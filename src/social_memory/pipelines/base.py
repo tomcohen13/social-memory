@@ -1,16 +1,16 @@
-# adapted from my SciBench project
-
-
-from datetime import datetime
+"""Base pipeline module"""
+import os
+import sys
 import logging
 
 from abc import ABC, abstractmethod
-import os
-from pathlib import Path
-import sys
-from pydantic import BaseModel, Field
+from datetime import datetime
+from pydantic import BaseModel
+from typing import Any, Iterable
 
 from social_memory.constants import RESULTS_DIR
+from social_memory.prompts import PROMPT_REGISTRY
+from social_memory.utils import load_qa_dataset
 
 
 class PipelineConfig(BaseModel):
@@ -20,10 +20,6 @@ class PipelineConfig(BaseModel):
     split: str
     max_concurrency: int = 4
     debug: bool = False
-
-    path_to_sys_prompt: str
-    prompt: str = Field(default_factory=lambda data: Path(data['path_to_sys_prompt']).read_text())
-
 
     def to_yaml(self, path: str) -> None:
         """Writes config object to yaml file"""
@@ -59,10 +55,14 @@ class Pipeline(ABC):
 
         self.configs = configs
         self.logger: logging.Logger = logger or self._create_logger()
-        self.run_id = self.generate_run_id()
+        self.run_id = self._generate_run_id()
         self.path_to_output = self._create_output_file_path()
+        self.model_runner = None
+        self.prompt_template = None
 
-        self.load_model_runner()
+        self._load_model_runner()  # updates self.model_runner
+        self._load_prompt_template()  # updates self.prompt_template
+
 
     def __repr__(self) -> str:
         """String representation for CLI or logging, similar to _repr_html_."""
@@ -78,6 +78,7 @@ class Pipeline(ABC):
             lines.append(f"    {k}: {v!r}")
         lines.append(")")
         return "\n".join(lines)
+
 
     def _repr_html_(self) -> str:
         """Rich HTML repr for Jupyter notebooks."""
@@ -110,15 +111,14 @@ class Pipeline(ABC):
         </table>
         """
 
-    def generate_run_id(self) -> str:
+
+    def _generate_run_id(self) -> str:
         """Generate run id for pipeline."""
         return str(datetime.timestamp(datetime.now()))
 
+
     def _create_logger(self) -> logging.Logger:
         """Create logger for pipeline."""
-        
-        print(self.configs)
-        print()
         logging.basicConfig(
             level=logging.INFO,
             format='%(asctime)s - %(levelname)s - %(message)s',
@@ -131,24 +131,33 @@ class Pipeline(ABC):
         )
         logger = logging.getLogger(__name__)
         return logger
-    
+
+
     def _create_output_file_path(self, create_if_not_existent: bool = True) -> str:
-        """Create output file path based on dataset, kind, and run ID."""
-        
+        """Create output file path based on model, split, pipeline name."""        
         path = os.path.join(
             RESULTS_DIR,
             self.name,
             self.configs.model,
             self.configs.split,
-            f"{self.run_id}.csv",
+            f"results.csv",
         )
         if create_if_not_existent:
             os.makedirs(os.path.dirname(path), exist_ok=True)
         return path
 
-    
+
+    def _load_prompt_template(self) -> None:
+        """Load prompt template from registry given pipeline"""
+        
+        if not self.prompt_template:
+            raise ValueError(f"Could not find prompt template for pipeline name {self.NAME}.")
+        
+        self.prompt_template = PROMPT_REGISTRY.get(self.NAME)
+
+
     @abstractmethod
-    async def load_model_runner(self) -> None:
+    async def _load_model_runner(self) -> None:
         """
         * SHOULD BE IMPLEMENTED BY INHERITING CLASS *
 
@@ -156,32 +165,39 @@ class Pipeline(ABC):
         which should be a langchain Runnable supporting `abatch_as_completed()`.
         """
         raise NotImplementedError
-    
+
+
     @abstractmethod
-    async def process_inputs(self):
+    async def process_inputs(self, dataset) -> Iterable[Any]:
         """
         * SHOULD BE IMPLEMENTED BY INHERITING CLASS *
 
         Custom inputs preprocessing. Should return an Iterable of inputs.
         """
         raise NotImplementedError
-    
+
+
     @abstractmethod
     async def run_model_on_inputs(self, inputs):
         """Should be implemented by inheriting classes"""
         raise NotImplementedError
-    
+
+
     async def run(self) -> None:
         """Run pipeline"""
 
         self.logger.info("Starting pipeline...")
         start_time = datetime.now()
 
+        # load split of QA dataset into dataframe
+        self.logger.info("loading dataset...")
+        dataset = load_qa_dataset(split=self.configs.split)
+        
         self.logger.info("Preparing inputs...")
-        inputs = self.prepare_inputs()
+        inputs = await self.process_inputs(dataset)
 
         self.logger.info(f"Processing {len(inputs)} documents.")
-        await self.arun_agent_on_inputs(inputs)
+        results = await self.run_model_on_inputs(inputs)
 
         elapsed_time = (datetime.now() - start_time).total_seconds()
         self.logger.info(f"Finished processing {len(inputs)} documents in {elapsed_time:.1f}s.")

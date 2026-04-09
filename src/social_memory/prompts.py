@@ -3,8 +3,10 @@
 
 from langchain_core.prompts import ChatPromptTemplate
 
+from social_memory.constants import PipelineNames
 
-QA_TEMPLATE_TRANSCRIPT = ChatPromptTemplate.from_messages(
+
+PROMPT_TEMPLATE_TRANSCRIPT = ChatPromptTemplate.from_messages(
     [
         (
             "system", 
@@ -27,3 +29,7 @@ QA_TEMPLATE_TRANSCRIPT = ChatPromptTemplate.from_messages(
         )
     ]
 )
+
+PROMPT_REGISTRY = {
+    PipelineNames.LANGUAGE: PROMPT_TEMPLATE_TRANSCRIPT,
+}

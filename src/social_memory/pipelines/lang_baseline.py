@@ -1,11 +1,15 @@
 """Test zero-shot performance of LLMs on transcript-only data"""
+from ast import Dict, List
 import logging
 import os
 import sys
+from typing import Any, Iterable
 import pandas as pd
 
 from argparse import ArgumentParser
 from dotenv import load_dotenv
+
+from social_memory.pipelines.base import Pipeline
 load_dotenv()
 
 from langchain.chat_models import init_chat_model
@@ -13,8 +17,8 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.messages import AIMessage
 from tqdm.asyncio import tqdm
 
-from social_memory.constants import DEFAULT_MODEL, DEFAULT_MODEL_PROVIDER
-from social_memory.prompts import QA_TEMPLATE_TRANSCRIPT
+from social_memory.constants import DEFAULT_MODEL, DEFAULT_MODEL_PROVIDER, PipelineNames
+from social_memory.prompts import PROMPT_TEMPLATE_TRANSCRIPT
 from social_memory.utils import compute_correctness, load_qa_dataset, load_transcripts
 
 
@@ -58,73 +62,90 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-async def main():
+class LanguagePipeline(Pipeline):
 
-    logger.info(f"Running {PIPELINE_NAME} pipeline with model {args.model} on {args.split} split...")
-    output_dir = os.path.join("results", PIPELINE_NAME, args.model, args.split)
-    os.makedirs(output_dir, exist_ok=True)
-    results_csv_path = os.path.join(output_dir, "results.csv")
+    NAME = PipelineNames.LANGUAGE
 
-    # initialize model(s) client
-    llm_with_retry = init_chat_model(args.model).with_retry(wait_exponential_jitter=True)
 
-    # set up concurrency configs 
-    config = RunnableConfig(max_concurrency=args.max_concurrency)
+    def _load_model_runner(self) -> None:
+        llm_with_retry = init_chat_model(self.configs.model).with_retry(wait_exponential_jitter=True, stop_after_attempt=4)
+        self.model_runner = self.prompt_template | llm_with_retry
 
-    # set up chain
-    prompt_template = QA_TEMPLATE_TRANSCRIPT
-    chain = prompt_template | llm_with_retry
 
-    # load split of QA dataset into dataframe
-    logger.info("loading dataset...")
-    dataset = load_qa_dataset(split=args.split)
-    
-    logger.info(f"loaded. size: {len(dataset)}")
-    transcripts = load_transcripts(
-        video_ids=dataset['vid_name'].unique(),
-        max_workers=args.max_concurrency
-    )
+    def process_inputs(self, dataset: pd.DataFrame) -> Iterable[Dict[str, str]]:
+        """
+        Prepare inputs as dictionaries with keys: 'qid', 'transcript', 'question', 'options'
 
-    logger.info("preparing inputs...")
-    inputs = [
-        {
-            "qid": row["qid"],
-            "transcript": transcripts.get(row['vid_name'], ""),
-            "question": row["q"],
-            "options": "\n".join([f"{i}: {row[f'a{i}']}" for i in range(4)])
-        }
-        for i, row in dataset.iterrows()
-        if transcripts.get(row['vid_name']) != ""
-    ]
-    if len(inputs) < len(dataset):
-        logger.warning(f"{len(dataset) - len(inputs)} were missing a transcript and will be skipped.")
+        Args:
+            dataset: a pandas dataframe, assumed to have the following columns:
+                qid (str): question id
+                vid_name (str): the video id
+                q (str): question content
+                a0, a1, a2, a3: answer options
+        
+        Return: iterable object with inputs (dict) ready for model processing
+        """
 
-    # TODO: make into function
-    errors = 0
-    results_df = dataset.assign(result=pd.NA).set_index("qid")
-    async for i, res in tqdm(
-        chain.abatch_as_completed(inputs=inputs, config=config, return_exceptions=True),
-        total=len(inputs),
-        desc=f"Processing with model {args.model}..."
-    ):
-        if isinstance(res, AIMessage):
-            result = int(res.content)
-            results_df.at[inputs[i]["qid"], "result"] = result
+        if os.path.exists(self.path_to_output):
+            self.logger("loading previous results...")
+            prev_results = pd.read_csv(self.path_to_output)
+            ids_to_skip = set(prev_results['qid'].unique())
         else:
-            # if isinstance(review, (Exception, ValueError, ValidationError)):
-            logger.error(f"There was an issue with: {inputs[i]['qid']}, error: {res}")
-            errors += 1
+            ids_to_skip = set()
 
-        if i > 0 and i % 10 == 0:
-            correctness = compute_correctness(results_df)
-            logger.info(f"Accuracy: {correctness}")
+        transcripts = load_transcripts(
+            video_ids=set(dataset['vid_name'].unique()) - ids_to_skip,
+            max_workers=args.max_concurrency
+        )
 
-    correctness = compute_correctness(results_df)
-    logger.info(f"Finished processing: {len(inputs)} inputs | errors: {errors} | Accuracy: {correctness}")
-    logger.info(f"Saving results to: {results_csv_path}")
-    results_df.to_csv(results_csv_path)
+        inputs = [
+            {
+                "qid": row["qid"],
+                "transcript": transcripts.get(row['vid_name'], ""),
+                "question": row["q"],
+                "options": "\n".join([f"{i}: {row[f'a{i}']}" for i in range(4)])
+            }
+            for i, row in dataset.iterrows()
+            if transcripts.get(row['vid_name']) != ""
+        ]
+        if len(inputs) < len(dataset):
+            self.logger.warning(f"{len(dataset) - len(inputs)} were missing a transcript and will be skipped.")
+        
+        return inputs
 
 
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+    async def run_model_on_inputs(self, inputs: List[Dict[str, str]]):
+        """
+        Execute selected model on inputs concurrently
+        """
+
+        try: # try loading previous results
+            results_df = pd.read_csv(self.path_to_output)
+        except:
+            results_df = pd.DataFrame(columns=["qid", "result"])
+        
+        # set up concurrency configs 
+        config = RunnableConfig(max_concurrency=self.configs.max_concurrency)
+
+        results: List[dict] = []
+        errors = 0
+
+        async for i, res in tqdm(
+            self.model_runner.abatch_as_completed(inputs=inputs, config=config, return_exceptions=True),
+            total=len(inputs),
+            desc=f"Running model {self.configs.model}..."
+        ):
+            if isinstance(res, AIMessage):
+                result = int(res.content)
+                results.append({"qid": inputs[i]["qid"], "result": result})
+            else:
+                # if isinstance(review, (Exception, ValueError, ValidationError)):
+                self.logger.error(f"There was an issue with: {inputs[i]['qid']}, error: {res}")
+                errors += 1
+
+            if i > 0 and i % 10 == 0:
+                correctness = compute_correctness(results_df)
+                logger.info(f"Accuracy: {correctness}")
+            
+        self.logger.info(f"Finished processing: {len(inputs)} inputs | errors: {errors}")
+        return results
