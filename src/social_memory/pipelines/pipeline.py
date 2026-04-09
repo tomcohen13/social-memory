@@ -1,12 +1,16 @@
 # adapted from my SciBench project
 
 
+from datetime import datetime
 import logging
 
 from abc import ABC, abstractmethod
+import os
 from pathlib import Path
+import sys
 from pydantic import BaseModel, Field
 
+from social_memory.constants import RESULTS_DIR
 
 
 class PipelineConfig(BaseModel):
@@ -58,7 +62,7 @@ class Pipeline(ABC):
         self.run_id = self.generate_run_id()
         self.path_to_output = self._create_output_file_path()
 
-        self.load_agent_runner()
+        self.load_model_runner()
 
     def __repr__(self) -> str:
         """String representation for CLI or logging, similar to _repr_html_."""
@@ -106,9 +110,79 @@ class Pipeline(ABC):
         </table>
         """
 
+    def generate_run_id(self) -> str:
+        """Generate run id for pipeline."""
+        return str(datetime.timestamp(datetime.now()))
 
+    def _create_logger(self) -> logging.Logger:
+        """Create logger for pipeline."""
+        
+        print(self.configs)
+        print()
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.FileHandler(
+                    f'logs/{self.configs.dataset}_{self.NAME}_{self.configs.model.replace(":", "_")}.log'
+                ),
+                logging.StreamHandler(sys.stdout)
+            ]
+        )
+        logger = logging.getLogger(__name__)
+        return logger
+    
+    def _create_output_file_path(self, create_if_not_existent: bool = True) -> str:
+        """Create output file path based on dataset, kind, and run ID."""
+        
+        path = os.path.join(
+            RESULTS_DIR,
+            self.name,
+            self.configs.model,
+            self.configs.split,
+            f"{self.run_id}.csv",
+        )
+        if create_if_not_existent:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+        return path
+
+    
     @abstractmethod
-    def load_agent_runner(self) -> None:
+    async def load_model_runner(self) -> None:
+        """
+        * SHOULD BE IMPLEMENTED BY INHERITING CLASS *
+
+        Adds a self.model_runner property to the pipeline, 
+        which should be a langchain Runnable supporting `abatch_as_completed()`.
+        """
+        raise NotImplementedError
+    
+    @abstractmethod
+    async def process_inputs(self):
+        """
+        * SHOULD BE IMPLEMENTED BY INHERITING CLASS *
+
+        Custom inputs preprocessing. Should return an Iterable of inputs.
+        """
+        raise NotImplementedError
+    
+    @abstractmethod
+    async def run_model_on_inputs(self, inputs):
         """Should be implemented by inheriting classes"""
         raise NotImplementedError
+    
+    async def run(self) -> None:
+        """Run pipeline"""
+
+        self.logger.info("Starting pipeline...")
+        start_time = datetime.now()
+
+        self.logger.info("Preparing inputs...")
+        inputs = self.prepare_inputs()
+
+        self.logger.info(f"Processing {len(inputs)} documents.")
+        await self.arun_agent_on_inputs(inputs)
+
+        elapsed_time = (datetime.now() - start_time).total_seconds()
+        self.logger.info(f"Finished processing {len(inputs)} documents in {elapsed_time:.1f}s.")
     
