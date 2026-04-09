@@ -37,7 +37,7 @@ parser.add_argument(
     "--max_concurrency",
     type=int,
     # required=True,
-    default=4,
+    default=2,
     help="Max concurrent requests to llm",
 )
 
@@ -61,18 +61,19 @@ logger = logging.getLogger(__name__)
 async def main():
 
     logger.info(f"Running {PIPELINE_NAME} pipeline with model {args.model} on {args.split} split...")
-
-    model_provider, model = args.model.split(":")
+    output_dir = os.path.join("results", PIPELINE_NAME, args.model, args.split)
+    os.makedirs(output_dir, exist_ok=True)
+    results_csv_path = os.path.join(output_dir, "results.csv")
 
     # initialize model(s) client
-    llm = init_chat_model(f"{model_provider}:{model}")
+    llm_with_retry = init_chat_model(args.model).with_retry(wait_exponential_jitter=True)
 
     # set up concurrency configs 
     config = RunnableConfig(max_concurrency=args.max_concurrency)
 
     # set up chain
     prompt_template = QA_TEMPLATE_TRANSCRIPT
-    chain = prompt_template | llm
+    chain = prompt_template | llm_with_retry
 
     # load split of QA dataset into dataframe
     logger.info("loading dataset...")
@@ -90,15 +91,17 @@ async def main():
             "qid": row["qid"],
             "transcript": transcripts.get(row['vid_name'], ""),
             "question": row["q"],
-            "options": ",".join([f"{col}: {row[col]}" for col in ["a0", "a1", "a2", "a3"]])
+            "options": "\n".join([f"{i}: {row[f'a{i}']}" for i in range(4)])
         }
         for i, row in dataset.iterrows()
         if transcripts.get(row['vid_name']) != ""
     ]
+    if len(inputs) < len(dataset):
+        logger.warning(f"{len(dataset) - len(inputs)} were missing a transcript and will be skipped.")
 
     # TODO: make into function
     errors = 0
-    results = []
+    results_df = dataset.assign(result=pd.NA).set_index("qid")
     async for i, res in tqdm(
         chain.abatch_as_completed(inputs=inputs, config=config, return_exceptions=True),
         total=len(inputs),
@@ -106,36 +109,20 @@ async def main():
     ):
         if isinstance(res, AIMessage):
             result = int(res.content)
-
+            results_df.at[inputs[i]["qid"], "result"] = result
         else:
             # if isinstance(review, (Exception, ValueError, ValidationError)):
+            logger.error(f"There was an issue with: {inputs[i]['qid']}, error: {res}")
             errors += 1
-            logger.error(f"Seems like there was an issue: {inputs[i]['qid']}, error: {res}")
-            result = "error"
 
-        results.append((inputs[i]["qid"], result))
+        if i > 0 and i % 10 == 0:
+            correctness = compute_correctness(results_df)
+            logger.info(f"Accuracy: {correctness}")
 
-    logger.info(f"processed: {len(inputs)} queries | errors: {errors}")
-    # convert into dataframe
-    results_df = pd.DataFrame(results, columns=["qid", "result"])
-    dataset_with_results = dataset.merge(results_df, how="left", on="qid")
-
-    correctness = compute_correctness(dataset_with_results)
-    logger.info(f"Finished running. Accuracy: {correctness}")
-
-    # Save results under results/<model>/<split>/ with benchmark accuracy in a CSV
-    output_dir = os.path.join("results", args.model, args.split)
-    os.makedirs(output_dir, exist_ok=True)
-    results_csv_path = os.path.join(output_dir, "results.csv")
-    metrics_path = os.path.join(output_dir, "metrics.txt")
-
-    dataset_with_results.to_csv(results_csv_path, index=False)
-
-    with open(metrics_path, "w") as f:
-        f.write(f"accuracy: {correctness}\n")
-
+    correctness = compute_correctness(results_df)
+    logger.info(f"Finished processing: {len(inputs)} inputs | errors: {errors} | Accuracy: {correctness}")
     logger.info(f"Saving results to: {results_csv_path}")
-    logger.info(f"Saving accuracy to: {metrics_path}")
+    results_df.to_csv(results_csv_path)
 
 
 if __name__ == "__main__":

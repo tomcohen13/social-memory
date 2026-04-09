@@ -63,10 +63,14 @@ def load_transcripts(
 
 
 def compute_correctness(df):
-    # adapted from Social-IQ repo
-    mask = df['result'].notnull() & (df['answer_idx'] == df['result'])
-    n_correct = mask.sum()
-    n_total = df['result'].notnull().sum()
+    # Coerce to numeric so int answer_idx vs object `result` (pd.NA + ints) does not hit
+    # NAType in == (TypeError: boolean value of NA is ambiguous).
+    predicted = pd.to_numeric(df["result"], errors="coerce")
+    gold = pd.to_numeric(df["answer_idx"], errors="coerce")
+    valid = predicted.notna()
+    mask = valid & (gold == predicted)
+    n_correct = int(mask.sum())
+    n_total = int(valid.sum())
     if n_total == 0:
-        return float('nan')
+        return pd.NA
     return n_correct / n_total
