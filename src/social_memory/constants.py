@@ -4,6 +4,7 @@ from typing import Mapping
 from enum import StrEnum, auto
 
 PATH_TO_DATA = "datasets/socialiq2/siq2/"
+RESULTS_DIR = "results/"
 
 class DirPaths(StrEnum):
     TRANSCRIPT = auto()
@@ -11,19 +12,5 @@ class DirPaths(StrEnum):
     FRAMES = auto()
     AUDIO = auto()
 
-
-PROVIDER_TO_API_KEY_MAP = {
-    "openai": "OPENAI_API_KEY",
-    "anthropic": "ANTHROPIC_API_KEY", #"ANTHROPIC_API_KEY",
-    "google": "OPENROUTER_API_KEY",  # Using OpenRouter for Google models
-    "deepseek": "OPENROUTER_API_KEY",  # Using OpenRouter for Google models
-    "qwen": "OPENROUTER_API_KEY",  # Using OpenRouter for Alibaba models
-    "mistral": "OPENROUTER_API_KEY",  # Using OpenRouter for Mistral models
-    "meta-llama": "OPENROUTER_API_KEY",  # Using OpenRouter for Meta models
-}
-
-MODELS_TO_TEST = {
-    "anthropic": [],
-    "openai": [],
-    "qwen": [],
-}
+DEFAULT_MODEL = "gpt-4.1-nano-2025-04-14"
+DEFAULT_MODEL_PROVIDER = "openai"

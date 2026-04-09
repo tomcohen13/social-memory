@@ -10,62 +10,8 @@ from typing import Iterable
 
 import pandas as pd
 import webvtt
-from langchain.chat_models import init_chat_model
-from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.rate_limiters import InMemoryRateLimiter
-from langchain_openai import ChatOpenAI
 
-from social_memory.constants import PATH_TO_DATA, PROVIDER_TO_API_KEY_MAP, DirPaths
-
-
-def init_model(
-    model: str,
-    provider: str,
-    api_key_provider: str | None = None,
-    rate_limiter = None,
-    temperature: float = 0.0,
-    max_retries: int = 3,
-) -> BaseChatModel:
-    """
-    Initialize a chat model based on the provider and model name.
-
-    Parameters:
-        model: model name (e.g., "gpt-4o-mini")
-        provider: provider name (e.g., "openai")
-        api_key_provider: provider of the API key (e.g., "openai" or "openrouter")
-        rate_limiter: rate limiter to use (default: None)
-        temperature: temperature [0.0,1.0)
-        max_retries: maximum number of retries (default: 3)
-    """
-
-    if rate_limiter is None:
-        rate_limiter = InMemoryRateLimiter(
-            requests_per_second=0.1,
-            check_every_n_seconds=0.5,
-            max_bucket_size=10,
-        )
-
-    base_model_configs = {
-        "max_retries": max_retries,
-        "rate_limiter": rate_limiter,
-        "temperature": temperature,
-    }
-
-    # TODO: change to ChatOpenAI for all given OpenRouter rate limit >> Anthropic's
-    if provider in ["openai", "anthropic"] and api_key_provider != "openrouter":
-        return init_chat_model(
-            model=model,
-            model_provider=provider,
-            **base_model_configs
-        )
-
-    else:
-        return ChatOpenAI(
-            base_url="https://openrouter.ai/api/v1", # OpenRouter base URL
-            api_key=os.getenv(PROVIDER_TO_API_KEY_MAP[provider]),
-            model=f"{provider}/{model}",
-            **base_model_configs,
-        )
+from social_memory.constants import PATH_TO_DATA, DirPaths
 
 
 def load_qa_dataset(split: str) -> pd.DataFrame:
@@ -114,3 +60,13 @@ def load_transcripts(
     worker = partial(_load_single_transcript, directory=directory)
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         return dict(pool.map(worker, video_ids))
+
+
+def compute_correctness(df):
+    # adapted from Social-IQ repo
+    mask = df['result'].notnull() & (df['answer_idx'] == df['result'])
+    n_correct = mask.sum()
+    n_total = df['result'].notnull().sum()
+    if n_total == 0:
+        return float('nan')
+    return n_correct / n_total
