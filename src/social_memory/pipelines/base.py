@@ -6,7 +6,7 @@ import logging
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pydantic import BaseModel
-from typing import Any, Iterable, List
+from typing import Dict, List
 
 from social_memory.constants import RESULTS_DIR
 from social_memory.prompts import PROMPT_REGISTRY
@@ -55,8 +55,8 @@ class Pipeline(ABC):
         self.model_runner = None
         self.prompt_template = None
 
-        self._load_model_runner()  # updates self.model_runner
         self._load_prompt_template()  # updates self.prompt_template
+        self._load_model_runner()  # updates self.model_runner
 
 
     def __repr__(self) -> str:
@@ -119,7 +119,7 @@ class Pipeline(ABC):
             format='%(asctime)s - %(levelname)s - %(message)s',
             handlers=[
                 logging.FileHandler(
-                    f'logs/{self.configs.dataset}_{self.NAME}_{self.configs.model.replace(":", "_")}.log'
+                    f'logs/{self.NAME}_{self.configs.model.replace(":", "_")}_{self.configs.split}.log'
                 ),
                 logging.StreamHandler(sys.stdout)
             ]
@@ -132,7 +132,7 @@ class Pipeline(ABC):
         """Create output file path based on model, split, pipeline name."""        
         path = os.path.join(
             RESULTS_DIR,
-            self.name,
+            self.NAME,
             self.configs.model,
             self.configs.split,
             f"results.jsonl",
@@ -145,11 +145,8 @@ class Pipeline(ABC):
     def _load_prompt_template(self) -> None:
         """Load prompt template from registry given pipeline"""
         
-        if not self.prompt_template:
-            raise ValueError(f"Could not find prompt template for pipeline name {self.NAME}.")
-        
         self.prompt_template = PROMPT_REGISTRY.get(self.NAME)
-
+        
     def write_results_to_json(self, results: List[dict]) -> None:
         """Write model results to disk as a JSONL file at self.path_to_output"""
         import json
@@ -173,7 +170,7 @@ class Pipeline(ABC):
 
 
     @abstractmethod
-    async def process_inputs(self, dataset) -> Iterable[Any]:
+    async def process_inputs(self, dataset) -> List[Dict[str, str]]:
         """
         * SHOULD BE IMPLEMENTED BY INHERITING CLASS *
 
@@ -183,7 +180,7 @@ class Pipeline(ABC):
 
 
     @abstractmethod
-    async def run_model_on_inputs(self, inputs):
+    async def run_model_on_inputs(self, inputs: List[Dict[str, str]]):
         """Should be implemented by inheriting classes"""
         raise NotImplementedError
 

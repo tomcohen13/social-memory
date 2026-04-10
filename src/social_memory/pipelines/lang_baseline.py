@@ -1,11 +1,7 @@
 """Test zero-shot performance of LLMs on transcript-only data"""
-from ast import Dict, List
 import os
-from typing import Any, Iterable
-
 import pandas as pd
-
-from social_memory.pipelines.base import Pipeline
+from typing import List, Dict
 
 from langchain.chat_models import init_chat_model
 from langchain_core.runnables import RunnableConfig
@@ -13,6 +9,7 @@ from langchain_core.messages import AIMessage
 from tqdm.asyncio import tqdm
 
 from social_memory.constants import PipelineNames
+from social_memory.pipelines.base import Pipeline
 from social_memory.utils import load_transcripts
 
 
@@ -26,7 +23,7 @@ class LanguagePipeline(Pipeline):
         self.model_runner = self.prompt_template | llm_with_retry
 
 
-    def process_inputs(self, dataset: pd.DataFrame) -> Iterable[Dict[str, str]]:
+    async def process_inputs(self, dataset: pd.DataFrame) -> List[Dict[str, str]]:
         """
         Prepare inputs as dictionaries with keys: 'qid', 'transcript', 'question', 'options'
 
@@ -42,7 +39,7 @@ class LanguagePipeline(Pipeline):
 
         if os.path.exists(self.path_to_output):
             self.logger.info("loading previous results...")
-            prev_results = pd.read_csv(self.path_to_output)
+            prev_results = pd.read_json(self.path_to_output, lines=True)
             ids_to_skip = set(prev_results['qid'].unique())
         else:
             ids_to_skip = set()

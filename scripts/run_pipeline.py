@@ -1,5 +1,14 @@
 """Test zero-shot performance of LLMs on transcript-only data"""
 
+from pathlib import Path
+import sys
+
+# Repo uses a src/ layout; running `python scripts/run_pipeline.py` does not put `src` on sys.path.
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_src = _REPO_ROOT / "src"
+if _src.is_dir():
+    sys.path.insert(0, str(_src))
+
 from argparse import ArgumentParser
 from dotenv import load_dotenv
 
