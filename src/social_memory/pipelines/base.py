@@ -222,9 +222,6 @@ class Pipeline(ABC):
         self.logger.info(f"Processing {len(inputs)} documents.")
         results: List[dict] = await self.run_model_on_inputs(inputs)
 
-        self.logger.info(f"Writing results to {self.path_to_output}")
-        self.write_results_to_json(results)
-
         elapsed_time = (datetime.now() - start_time).total_seconds()
         self.logger.info(f"Finished processing {len(inputs)} documents in {elapsed_time:.1f}s.")
     
