@@ -3,14 +3,13 @@ import os
 import pandas as pd
 from typing import List, Dict
 
-from langchain.chat_models import init_chat_model
 from langchain_core.runnables import RunnableConfig
 from langchain_core.messages import AIMessage
 from tqdm.asyncio import tqdm
 
 from social_memory.constants import PipelineNames
 from social_memory.pipelines.base import Pipeline
-from social_memory.utils import load_transcripts
+from social_memory.utils import load_chat_model, load_transcripts
 
 
 class LanguagePipeline(Pipeline):
@@ -19,8 +18,8 @@ class LanguagePipeline(Pipeline):
 
 
     def _load_model_runner(self) -> None:
-        llm_with_retry = init_chat_model(self.configs.model).with_retry(wait_exponential_jitter=True, stop_after_attempt=4)
-        self.model_runner = self.prompt_template | llm_with_retry
+        llm = load_chat_model(self.configs.model)
+        self.model_runner = self.prompt_template | llm
 
 
     async def process_inputs(self, dataset: pd.DataFrame) -> List[Dict[str, str]]:
@@ -82,8 +81,12 @@ class LanguagePipeline(Pipeline):
             desc=f"Running model {self.configs.model}..."
         ):
             if isinstance(res, AIMessage):
-                result = int(res.content)
-                results.append({"qid": inputs[i]["qid"], "result": result})
+                try:
+                    result = int(res.content)
+                    results.append({"qid": inputs[i]["qid"], "result": result})
+                except:
+                    self.logger.error(f"There was an issue with: {inputs[i]['qid']}, error: {res}")
+                    errors += 1
             else:
                 # if isinstance(review, (Exception, ValueError, ValidationError)):
                 self.logger.error(f"There was an issue with: {inputs[i]['qid']}, error: {res}")
