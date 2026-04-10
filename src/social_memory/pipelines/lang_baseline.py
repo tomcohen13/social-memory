@@ -3,13 +3,14 @@ import os
 import pandas as pd
 from typing import List, Dict
 
+from langchain.chat_models import init_chat_model
 from langchain_core.runnables import RunnableConfig
 from langchain_core.messages import AIMessage
 from tqdm.asyncio import tqdm
 
 from social_memory.constants import PipelineNames
 from social_memory.pipelines.base import Pipeline
-from social_memory.utils import load_chat_model, load_transcripts
+from social_memory.utils import load_transcripts
 
 
 class LanguagePipeline(Pipeline):
@@ -18,8 +19,9 @@ class LanguagePipeline(Pipeline):
 
 
     def _load_model_runner(self) -> None:
-        llm = load_chat_model(self.configs.model)
-        self.model_runner = self.prompt_template | llm
+        llm = init_chat_model(self.configs.model, max_tokens=50)
+        llm_with_retry = llm.with_retry(wait_exponential_jitter=True, stop_after_attempt=4)
+        self.model_runner = self.prompt_template | llm_with_retry
 
 
     async def process_inputs(self, dataset: pd.DataFrame) -> List[Dict[str, str]]:
