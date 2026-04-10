@@ -18,10 +18,12 @@ class LanguagePipeline(Pipeline):
     NAME = PipelineNames.LANGUAGE
 
     def _load_model_runner(self) -> None:
-        llm = init_chat_model(self.configs.model, max_tokens=50)
-        llm_with_retry = llm.with_retry(wait_exponential_jitter=True, stop_after_attempt=4)
+        """
+        Load LLM runner, restricting output tokens and with exponential-backoff retry.
+        """
+        llm = self._load_model()
+        llm_with_retry = llm.bind(max_tokens=50).with_retry(wait_exponential_jitter=True, stop_after_attempt=4)
         self.model_runner = self.prompt_template | llm_with_retry
-
 
     async def process_inputs(self, dataset: pd.DataFrame) -> List[Dict[str, str]]:
         """
@@ -74,6 +76,7 @@ class LanguagePipeline(Pipeline):
         config = RunnableConfig(max_concurrency=self.configs.max_concurrency)
 
         results: List[dict] = []
+        unsaved: List[dict] = []
         errors = 0
 
         async for i, res in tqdm(
@@ -84,7 +87,9 @@ class LanguagePipeline(Pipeline):
             if isinstance(res, AIMessage):
                 try:
                     result = int(res.content)
-                    results.append({"qid": inputs[i]["qid"], "result": result})
+                    entry = {"qid": inputs[i]["qid"], "result": result}
+                    results.append(entry)
+                    unsaved.append(entry)
                 except:
                     self.logger.error(f"There was an issue with: {inputs[i]['qid']}, error: {res}")
                     errors += 1
@@ -93,9 +98,9 @@ class LanguagePipeline(Pipeline):
                 self.logger.error(f"There was an issue with: {inputs[i]['qid']}, error: {res}")
                 errors += 1
 
-            if i > 0 and i % 10 == 0:
-                pass
-                # TODO: write/append intermediate results to file at self.path_to_output
+            if len(unsaved) >= 10:
+                self.write_results_to_json(unsaved)
+                unsaved = []
             
         self.logger.info(f"Finished processing: {len(inputs)} inputs | errors: {errors}")
         return results

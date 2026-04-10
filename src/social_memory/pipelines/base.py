@@ -5,6 +5,8 @@ import logging
 
 from abc import ABC, abstractmethod
 from datetime import datetime
+from langchain.chat_models import BaseChatModel, init_chat_model
+from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 from typing import Dict, List
 
@@ -158,6 +160,24 @@ class Pipeline(ABC):
             for result in tqdm(results, desc="Writing results"):
                 json.dump(result, f, ensure_ascii=False)
                 f.write("\n")          
+
+    
+    def _load_model(self) -> BaseChatModel:
+        """Load LLM with restrictions"""
+
+        model_provider, model = self.configs.model.split(":")
+
+        if model_provider in ["openai", "anthropic", "google_genai"]:
+            return init_chat_model(model=model, model_provider=model_provider, temperature=0.0)
+        
+        else:
+            # OpenRouter
+            return ChatOpenAI(
+                base_url="https://openrouter.ai/api/v1/",
+                api_key=os.getenv("OPENROUTER_API_KEY"),
+                model_name="/".join([model_provider, model]),
+            )
+
 
     @abstractmethod
     async def _load_model_runner(self) -> None:

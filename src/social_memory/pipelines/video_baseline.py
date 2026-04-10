@@ -18,7 +18,9 @@ class VideoPipeline(Pipeline):
     NAME = PipelineNames.VIDEO
 
     def _load_model_runner(self) -> None:
-        llm_with_retry = init_chat_model(self.configs.model).with_retry(wait_exponential_jitter=True, stop_after_attempt=4)
+        llm = self._load_model()
+        # TODO: move max_tokens, retry to _load_model function?
+        llm_with_retry = llm.bind(max_tokens=50).with_retry(wait_exponential_jitter=True, stop_after_attempt=4)
         self.model_runner = self.prompt_template | llm_with_retry
 
     async def process_inputs(self, dataset: pd.DataFrame) -> List[Dict]:
@@ -78,7 +80,7 @@ class VideoPipeline(Pipeline):
         ):
             if isinstance(res, AIMessage):
                 text = res.content if isinstance(res.content, str) else str(res.content)
-                self.logger.info(f"[{inputs[i]['qid']}] Gemini: {text!r}")
+                self.logger.info(f"[{inputs[i]['qid']}] {text!r}")
                 match = re.search(r'[0-3]', text)
                 if match:
                     entry = {"qid": inputs[i]["qid"], "result": int(match.group())}
