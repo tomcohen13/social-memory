@@ -18,7 +18,8 @@ class LanguagePipeline(Pipeline):
     NAME = PipelineNames.LANGUAGE
 
     def _load_model_runner(self) -> None:
-        llm_with_retry = init_chat_model(self.configs.model).with_retry(wait_exponential_jitter=True, stop_after_attempt=4)
+        llm = init_chat_model(self.configs.model, max_tokens=50)
+        llm_with_retry = llm.with_retry(wait_exponential_jitter=True, stop_after_attempt=4)
         self.model_runner = self.prompt_template | llm_with_retry
 
 
@@ -81,8 +82,12 @@ class LanguagePipeline(Pipeline):
             desc=f"Running model {self.configs.model}..."
         ):
             if isinstance(res, AIMessage):
-                result = int(res.content)
-                results.append({"qid": inputs[i]["qid"], "result": result})
+                try:
+                    result = int(res.content)
+                    results.append({"qid": inputs[i]["qid"], "result": result})
+                except:
+                    self.logger.error(f"There was an issue with: {inputs[i]['qid']}, error: {res}")
+                    errors += 1
             else:
                 # if isinstance(review, (Exception, ValueError, ValidationError)):
                 self.logger.error(f"There was an issue with: {inputs[i]['qid']}, error: {res}")
