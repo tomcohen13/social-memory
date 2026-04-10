@@ -1,51 +1,57 @@
-"""Run selected pipeline on specific split"""
-
+"""Test zero-shot performance of LLMs on transcript-only data"""
 
 from argparse import ArgumentParser
+from dotenv import load_dotenv
 
-from src.constants import MODELS_TO_TEST
+from social_memory.constants import DEFAULT_MODEL, DEFAULT_MODEL_PROVIDER
+from social_memory.pipelines.base import PipelineConfig
+from social_memory.pipelines.registry import PIPELINE_REGISTRY
 
+load_dotenv()
 
 parser = ArgumentParser()
 parser.add_argument(
     "--pipeline",
     type=str,
-    required=True,
-    choices=["language", "audio", "vision", "all"],
-    help="Choose from: transcript, full",
+    choices=sorted(PIPELINE_REGISTRY),
+    help="Which pipeline implementation to run.",
 )
 parser.add_argument(
     "--model",
+    type=str,
     required=True,
-    choices=[f"{provider}:{model}" for provider, models in MODELS_TO_TEST.items() for model in models],
-    help="A str of provider:model to run the pipeline on."
+    default=":".join([DEFAULT_MODEL_PROVIDER, DEFAULT_MODEL]),
 )
 parser.add_argument(
     "--split",
     type=str,
-    required=True,
-    choices=["train", "val", "test"],
+    choices=["train", "val", "test", "demo"],
+    default="demo",
     help="The split of the dataset to run the pipeline on",
 )
 parser.add_argument(
-    "--max_docs",
+    "--max_concurrency",
     type=int,
-    required=False,
-    default=None,
+    default=2,
+    help="Max concurrent requests to llm",
 )
-parser.add_argument(
-    "--experiment",
-    type=str,
-    required=True,
-    default="",
-    help="Experiment name. Results will be saved under results/<benchmark>/<dataset>/<experiment or all_results>.csv"
-)
-parser.add_argument(
-    "--debug",
-    type=bool,
-    help="Enable debug mode with more verbose logging.",
-    default=False,
-)
+
 args = parser.parse_args()
 
+async def main():
+    configs = PipelineConfig(
+        model=args.model,
+        split=args.split,
+        max_concurrency=args.max_concurrency,
+    )
+    if args.pipeline not in PIPELINE_REGISTRY:
+        raise ValueError(f"No pipeline found for key: {args.pipeline}")
+    
+    pipeline_cls = PIPELINE_REGISTRY[args.pipeline]
+    pipeline = pipeline_cls(configs=configs)
+    await pipeline.run()
 
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())

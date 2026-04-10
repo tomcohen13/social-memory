@@ -1,65 +1,19 @@
 """Test zero-shot performance of LLMs on transcript-only data"""
 from ast import Dict, List
-import logging
 import os
-import sys
 from typing import Any, Iterable
+
 import pandas as pd
 
-from argparse import ArgumentParser
-from dotenv import load_dotenv
-
 from social_memory.pipelines.base import Pipeline
-load_dotenv()
 
 from langchain.chat_models import init_chat_model
 from langchain_core.runnables import RunnableConfig
 from langchain_core.messages import AIMessage
 from tqdm.asyncio import tqdm
 
-from social_memory.constants import DEFAULT_MODEL, DEFAULT_MODEL_PROVIDER, PipelineNames
-from social_memory.prompts import PROMPT_TEMPLATE_TRANSCRIPT
-from social_memory.utils import compute_correctness, load_qa_dataset, load_transcripts
-
-
-parser = ArgumentParser()
-parser.add_argument(
-    "--model",
-    type=str,
-    # required=True,
-    default=":".join([DEFAULT_MODEL_PROVIDER, DEFAULT_MODEL]),
-)
-parser.add_argument(
-    "--split",
-    type=str,
-    # required=True,
-    choices=["train", "val", "test", "demo"],
-    default="demo",
-    help="The split of the dataset to run the pipeline on",
-)
-parser.add_argument(
-    "--max_concurrency",
-    type=int,
-    # required=True,
-    default=2,
-    help="Max concurrent requests to llm",
-)
-
-args = parser.parse_args()
-
-PIPELINE_NAME = "language-only"
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(
-            f'logs/{PIPELINE_NAME}_{args.model.replace(":", "_")}_{args.split}.log'
-        ),
-        logging.StreamHandler(sys.stdout)
-    ]
-)
-logger = logging.getLogger(__name__)
+from social_memory.constants import PipelineNames
+from social_memory.utils import load_transcripts
 
 
 class LanguagePipeline(Pipeline):
@@ -87,7 +41,7 @@ class LanguagePipeline(Pipeline):
         """
 
         if os.path.exists(self.path_to_output):
-            self.logger("loading previous results...")
+            self.logger.info("loading previous results...")
             prev_results = pd.read_csv(self.path_to_output)
             ids_to_skip = set(prev_results['qid'].unique())
         else:
@@ -95,7 +49,7 @@ class LanguagePipeline(Pipeline):
 
         transcripts = load_transcripts(
             video_ids=set(dataset['vid_name'].unique()) - ids_to_skip,
-            max_workers=args.max_concurrency
+            max_workers=self.configs.max_concurrency
         )
 
         inputs = [
@@ -119,11 +73,6 @@ class LanguagePipeline(Pipeline):
         Execute selected model on inputs concurrently
         """
 
-        try: # try loading previous results
-            results_df = pd.read_csv(self.path_to_output)
-        except:
-            results_df = pd.DataFrame(columns=["qid", "result"])
-        
         # set up concurrency configs 
         config = RunnableConfig(max_concurrency=self.configs.max_concurrency)
 
@@ -144,8 +93,8 @@ class LanguagePipeline(Pipeline):
                 errors += 1
 
             if i > 0 and i % 10 == 0:
-                correctness = compute_correctness(results_df)
-                logger.info(f"Accuracy: {correctness}")
+                pass
+                # TODO: write/append intermediate results to file at self.path_to_output
             
         self.logger.info(f"Finished processing: {len(inputs)} inputs | errors: {errors}")
         return results

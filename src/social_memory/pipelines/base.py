@@ -6,7 +6,7 @@ import logging
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pydantic import BaseModel
-from typing import Any, Iterable
+from typing import Any, Iterable, List
 
 from social_memory.constants import RESULTS_DIR
 from social_memory.prompts import PROMPT_REGISTRY
@@ -47,14 +47,9 @@ class Pipeline(ABC):
 
     NAME: str = ""
 
-    def __init__(
-        self,
-        configs: PipelineConfig,
-        logger: logging.Logger = None,
-    ) -> None:
-
+    def __init__(self, configs: PipelineConfig) -> None:
         self.configs = configs
-        self.logger: logging.Logger = logger or self._create_logger()
+        self.logger: logging.Logger = self._create_logger()
         self.run_id = self._generate_run_id()
         self.path_to_output = self._create_output_file_path()
         self.model_runner = None
@@ -140,7 +135,7 @@ class Pipeline(ABC):
             self.name,
             self.configs.model,
             self.configs.split,
-            f"results.csv",
+            f"results.jsonl",
         )
         if create_if_not_existent:
             os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -155,6 +150,16 @@ class Pipeline(ABC):
         
         self.prompt_template = PROMPT_REGISTRY.get(self.NAME)
 
+    def write_results_to_json(self, results: List[dict]) -> None:
+        """Write model results to disk as a JSONL file at self.path_to_output"""
+        import json
+        from tqdm import tqdm
+
+        mode = "a" if os.path.exists(self.path_to_output) else "w"
+        with open(self.path_to_output, mode, encoding="utf-8") as f:
+            for result in tqdm(results, desc="Writing results"):
+                json.dump(result, f, ensure_ascii=False)
+                f.write("\n")          
 
     @abstractmethod
     async def _load_model_runner(self) -> None:
@@ -197,7 +202,10 @@ class Pipeline(ABC):
         inputs = await self.process_inputs(dataset)
 
         self.logger.info(f"Processing {len(inputs)} documents.")
-        results = await self.run_model_on_inputs(inputs)
+        results: List[dict] = await self.run_model_on_inputs(inputs)
+
+        self.logger.info(f"Writing results to {self.path_to_output}")
+        self.write_results_to_json(results)
 
         elapsed_time = (datetime.now() - start_time).total_seconds()
         self.logger.info(f"Finished processing {len(inputs)} documents in {elapsed_time:.1f}s.")
