@@ -170,22 +170,19 @@ class Pipeline(ABC):
         if model_provider in ["openai", "anthropic", "google_genai"]:
             return init_chat_model(model=model, model_provider=model_provider, temperature=0.0)
         elif model_provider == "huggingface":
-            from langchain_huggingface import HuggingFacePipeline
-            return HuggingFacePipeline.from_model_id(
-                model_id=model,
-                task="text-generation",
-                pipeline_kwargs={"temperature": 0.0, "max_new_tokens": 512},
-            )
-        elif model_provider == "huggingface_vision":
-            from langchain_huggingface import HuggingFacePipeline
-            return HuggingFacePipeline.from_model_id(
-                model_id=model,
-                task="image-text-to-text",
-                pipeline_kwargs={"max_new_tokens": 512},
-            )
-        elif model_provider == "videollama2":
-            from social_memory.pipelines.videollama2 import VideoLLaMA2ChatModel
-            return VideoLLaMA2ChatModel(model_id=model)
+            if "VideoLLaMA" in model:
+                from social_memory.pipelines.videollama2 import VideoLLaMA2ChatModel
+                return VideoLLaMA2ChatModel(model_id=model)
+            else:
+                from langchain_huggingface import HuggingFacePipeline
+                task = "image-text-to-text" if any(
+                    k in model for k in ["llava", "idefics", "qwen-vl", "Qwen2-VL"]
+                ) else "text-generation"
+                return HuggingFacePipeline.from_model_id(
+                    model_id=model,
+                    task=task,
+                    pipeline_kwargs={"max_new_tokens": 512},
+                )
         else:
             # OpenRouter
             return ChatOpenAI(
