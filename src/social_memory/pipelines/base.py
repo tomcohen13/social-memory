@@ -122,7 +122,7 @@ class Pipeline(ABC):
             format='%(asctime)s - %(levelname)s - %(message)s',
             handlers=[
                 logging.FileHandler(
-                    f'logs/{self.NAME}_{self.configs.model.replace(":", "_")}_{self.configs.split}.log'
+                    f'logs/{self.NAME}_{self.configs.model.replace(":", "_").replace("/", "_")}_{self.configs.split}.log'
                 ),
                 logging.StreamHandler(sys.stdout)
             ]

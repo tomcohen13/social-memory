@@ -1,4 +1,6 @@
 """Custom LangChain ChatModel wrapper for VideoLLaMA2"""
+import base64
+import tempfile
 from typing import Any, Dict, List, Optional
 
 from langchain_core.callbacks import CallbackManagerForLLMRun
@@ -47,7 +49,12 @@ class VideoLLaMA2ChatModel(BaseChatModel):
         self._loaded = True
 
     def _extract_video_and_text(self, message: HumanMessage) -> tuple[Optional[str], str]:
-        """Parse a HumanMessage into (video_path, text_prompt)."""
+        """Parse a HumanMessage into (video_path, text_prompt).
+
+        Supports two content block formats:
+        - {"type": "video", "path": "/path/to/video.mp4"}  (direct path)
+        - {"type": "media", "mime_type": "video/mp4", "data": "<base64>"}  (base64-encoded)
+        """
         if isinstance(message.content, str):
             return None, message.content
 
@@ -57,6 +64,13 @@ class VideoLLaMA2ChatModel(BaseChatModel):
             if isinstance(block, dict):
                 if block.get("type") == "video":
                     video_path = block.get("path")
+                elif block.get("type") == "media" and "video" in block.get("mime_type", ""):
+                    # Decode base64 video data to a temp file
+                    video_bytes = base64.b64decode(block["data"])
+                    tmp = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
+                    tmp.write(video_bytes)
+                    tmp.close()
+                    video_path = tmp.name
                 elif block.get("type") == "text":
                     text_parts.append(block.get("text", ""))
         return video_path, " ".join(text_parts)
@@ -87,10 +101,12 @@ class VideoLLaMA2ChatModel(BaseChatModel):
             return_tensors="pt",
         ).to(self._model.device, torch.float16)
 
+        max_new_tokens = kwargs.get("max_tokens", self.max_new_tokens)
+
         with torch.no_grad():
             output_ids = self._model.generate(
                 **inputs,
-                max_new_tokens=self.max_new_tokens,
+                max_new_tokens=max_new_tokens,
                 do_sample=self.temperature > 0.0,
                 temperature=self.temperature if self.temperature > 0.0 else None,
             )
