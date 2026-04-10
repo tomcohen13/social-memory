@@ -65,33 +65,33 @@ Five models across **Google (Gemini)**, **OpenAI**, **Meta (Llama)**, and **Qwen
 <tr>
 <th align="left">Provider</th>
 <th align="left">Model</th>
-<th align="center">Pipeline</th>
+<th align="center">Modalities</th>
 <th align="right">Validation accuracy</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td align="left"><img src="assets/google.svg" width="22" height="22" alt="Google" valign="middle" /></td>
-<td align="left"><code>gemini-2.5-flash</code></td>
-<td align="center"><code>language</code></td>
-<td align="right"><strong>73.81%</strong></td>
+<td align="left"><code>gemini-2.5-pro</code></td>
+<td align="center"><code>video</code><code>audio</code></td>
+<td align="right"><strong>81.76%</strong></td>
 </tr>
 <tr>
 <td align="left"><img src="assets/google.svg" width="22" height="22" alt="Google" valign="middle" /></td>
 <td align="left"><code>gemini-2.5-pro</code></td>
 <td align="center"><code>video</code></td>
-<td align="right"><strong>81.76%</strong></td>
+<td align="right"><strong>74.14%</strong></td>
 </tr>
 <tr>
-<td align="left"><img src="assets/openai.svg" width="22" height="22" alt="OpenAI" valign="middle" /></td>
-<td align="left"><code>gpt-4.1-nano</code></td>
-<td align="center"><code>language</code></td>
-<td align="right"><strong>58.31%</strong></td>
+<td align="left"><img src="assets/google.svg" width="22" height="22" alt="Google" valign="middle" /></td>
+<td align="left"><code>gemini-2.5-flash</code></td>
+<td align="center"><code>text</code></td>
+<td align="right"><strong>73.81%</strong></td>
 </tr>
 <tr>
 <td align="left"><img src="assets/meta.svg" width="22" height="22" alt="Meta" valign="middle" /></td>
 <td align="left"><code>Llama 3.3 70B</code></td>
-<td align="center"><code>language</code></td>
+<td align="center"><code>text</code></td>
 <td align="right"><strong>69.65%</strong></td>
 </tr>
 <tr>
@@ -99,6 +99,12 @@ Five models across **Google (Gemini)**, **OpenAI**, **Meta (Llama)**, and **Qwen
 <td align="left"><code>Qwen3 VL 32B</code></td>
 <td align="center"><code>video</code></td>
 <td align="right"><strong>62.80%</strong></td>
+</tr>
+<tr>
+<td align="left"><img src="assets/openai.svg" width="22" height="22" alt="OpenAI" valign="middle" /></td>
+<td align="left"><code>gpt-4.1-nano</code></td>
+<td align="center"><code>text</code></td>
+<td align="right"><strong>58.31%</strong></td>
 </tr>
 </tbody>
 </table>
