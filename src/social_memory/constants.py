@@ -10,6 +10,7 @@ class DirPaths(StrEnum):
     QA = auto()
     FRAMES = auto()
     AUDIO = auto()
+    VIDEO = auto()
 
 class PipelineNames(StrEnum):
     LANGUAGE = auto()
@@ -19,3 +20,8 @@ class PipelineNames(StrEnum):
 
 DEFAULT_MODEL = "gpt-4.1-nano-2025-04-14"
 DEFAULT_MODEL_PROVIDER = "openai"
+
+GEMINI_MODEL = "gemini-2.5-pro"
+GEMINI_MODEL_PROVIDER = "google"
+
+

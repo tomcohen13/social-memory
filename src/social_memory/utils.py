@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import os
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
@@ -12,7 +13,6 @@ import pandas as pd
 import webvtt
 
 from social_memory.constants import PATH_TO_DATA, DirPaths
-
 
 def load_qa_dataset(split: str) -> pd.DataFrame:
     """
@@ -58,6 +58,41 @@ def load_transcripts(
         return {}
 
     worker = partial(_load_single_transcript, directory=directory)
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        return dict(pool.map(worker, video_ids))
+
+
+def _load_single_video(vid: str, directory: Path) -> tuple[str, str]:
+    path = directory / f"{vid}.mp4"
+    if not path.is_file():
+        return vid, ""
+    with open(path, "rb") as f:
+        return vid, base64.b64encode(f.read()).decode("utf-8")
+
+
+def load_videos(
+    video_ids: Iterable[str],
+    max_workers: int | None = 4,
+) -> dict[str, str]:
+    """
+    Loads .mp4 video files for a list of video IDs as base64-encoded strings.
+
+    Returns a dictionary mapping each video ID to its base64-encoded video content.
+    If a video file is missing, the value will be an empty string.
+
+    Args:
+        video_ids: An iterable of video IDs to load.
+        max_workers: Maximum number of threads to use for reading files.
+
+    Returns:
+        A dictionary with video IDs as keys and base64 video strings as values.
+    """
+    directory = Path(PATH_TO_DATA) / str(DirPaths.VIDEO)
+
+    if not video_ids:
+        return {}
+
+    worker = partial(_load_single_video, directory=directory)
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         return dict(pool.map(worker, video_ids))
 

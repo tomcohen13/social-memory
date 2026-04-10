@@ -1,5 +1,6 @@
-"""Test zero-shot performance of LLMs on transcript-only data"""
+"""Test zero-shot performance of LLMs on video data"""
 import os
+import re
 import pandas as pd
 from typing import List, Dict
 
@@ -10,29 +11,26 @@ from tqdm.asyncio import tqdm
 
 from social_memory.constants import PipelineNames
 from social_memory.pipelines.base import Pipeline
-from social_memory.utils import load_transcripts
+from social_memory.utils import load_videos
 
 
-class LanguagePipeline(Pipeline):
-
-    NAME = PipelineNames.LANGUAGE
+class VideoPipeline(Pipeline):
+    NAME = PipelineNames.VIDEO
 
     def _load_model_runner(self) -> None:
         llm_with_retry = init_chat_model(self.configs.model).with_retry(wait_exponential_jitter=True, stop_after_attempt=4)
         self.model_runner = self.prompt_template | llm_with_retry
 
-
-    async def process_inputs(self, dataset: pd.DataFrame) -> List[Dict[str, str]]:
+    async def process_inputs(self, dataset: pd.DataFrame) -> List[Dict]:
         """
-        Prepare inputs as dictionaries with keys: 'qid', 'transcript', 'question', 'options'
-
+        Prepare inputs as dictionaries with keys: 'qid', 'video', 'question', 'options'
         Args:
             dataset: a pandas dataframe, assumed to have the following columns:
                 qid (str): question id
                 vid_name (str): the video id
                 q (str): question content
                 a0, a1, a2, a3: answer options
-        
+
         Return: iterable object with inputs (dict) ready for model processing
         """
 
@@ -43,7 +41,7 @@ class LanguagePipeline(Pipeline):
         else:
             ids_to_skip = set()
 
-        transcripts = load_transcripts(
+        videos = load_videos(
             video_ids=set(dataset['vid_name'].unique()) - ids_to_skip,
             max_workers=self.configs.max_concurrency
         )
@@ -51,28 +49,26 @@ class LanguagePipeline(Pipeline):
         inputs = [
             {
                 "qid": row["qid"],
-                "transcript": transcripts.get(row['vid_name'], ""),
+                "video": videos.get(row['vid_name'], ""),
                 "question": row["q"],
                 "options": "\n".join([f"{i}: {row[f'a{i}']}" for i in range(4)])
             }
             for i, row in dataset.iterrows()
-            if transcripts.get(row['vid_name']) != ""
+            if videos.get(row['vid_name'])
         ]
         if len(inputs) < len(dataset):
-            self.logger.warning(f"{len(dataset) - len(inputs)} were missing a transcript and will be skipped.")
-        
+            self.logger.warning(f"{len(dataset) - len(inputs)} were missing a video and will be skipped.")
+
         return inputs
 
-
-    async def run_model_on_inputs(self, inputs: List[Dict[str, str]]):
+    async def run_model_on_inputs(self, inputs: List[Dict]):
         """
         Execute selected model on inputs concurrently
         """
-
-        # set up concurrency configs 
         config = RunnableConfig(max_concurrency=self.configs.max_concurrency)
 
         results: List[dict] = []
+        unsaved: List[dict] = []
         errors = 0
 
         async for i, res in tqdm(
@@ -81,16 +77,26 @@ class LanguagePipeline(Pipeline):
             desc=f"Running model {self.configs.model}..."
         ):
             if isinstance(res, AIMessage):
-                result = int(res.content)
-                results.append({"qid": inputs[i]["qid"], "result": result})
+                text = res.content if isinstance(res.content, str) else str(res.content)
+                self.logger.info(f"[{inputs[i]['qid']}] Gemini: {text!r}")
+                match = re.search(r'[0-3]', text)
+                if match:
+                    entry = {"qid": inputs[i]["qid"], "result": int(match.group())}
+                    results.append(entry)
+                    unsaved.append(entry)
+                else:
+                    self.logger.error(f"Could not parse result for {inputs[i]['qid']}: {text!r}")
+                    errors += 1
             else:
-                # if isinstance(review, (Exception, ValueError, ValidationError)):
                 self.logger.error(f"There was an issue with: {inputs[i]['qid']}, error: {res}")
                 errors += 1
 
-            if i > 0 and i % 10 == 0:
-                pass
-                # TODO: write/append intermediate results to file at self.path_to_output
-            
+            if len(unsaved) >= 10:
+                self.write_results_to_json(unsaved)
+                unsaved = []
+
+        if unsaved:
+            self.write_results_to_json(unsaved)
+
         self.logger.info(f"Finished processing: {len(inputs)} inputs | errors: {errors}")
         return results

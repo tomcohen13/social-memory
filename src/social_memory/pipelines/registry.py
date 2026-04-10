@@ -6,7 +6,9 @@ from typing import Type
 
 from social_memory.pipelines.base import Pipeline
 from social_memory.pipelines.lang_baseline import LanguagePipeline
+from social_memory.pipelines.video_baseline import VideoPipeline
 
 PIPELINE_REGISTRY: dict[str, Type[Pipeline]] = {
     "language": LanguagePipeline,
+    "video": VideoPipeline,
 }

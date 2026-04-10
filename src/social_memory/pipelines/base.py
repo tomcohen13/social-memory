@@ -114,6 +114,7 @@ class Pipeline(ABC):
 
     def _create_logger(self) -> logging.Logger:
         """Create logger for pipeline."""
+        os.makedirs("logs", exist_ok=True)
         logging.basicConfig(
             level=logging.INFO,
             format='%(asctime)s - %(levelname)s - %(message)s',
