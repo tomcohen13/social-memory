@@ -122,7 +122,7 @@ class Pipeline(ABC):
             format='%(asctime)s - %(levelname)s - %(message)s',
             handlers=[
                 logging.FileHandler(
-                    f'logs/{self.NAME}_{self.configs.model.replace(":", "_")}_{self.configs.split}.log'
+                    f'logs/{self.NAME}_{self.configs.model.replace(":", "_").replace("/", "_")}_{self.configs.split}.log'
                 ),
                 logging.StreamHandler(sys.stdout)
             ]
@@ -169,7 +169,20 @@ class Pipeline(ABC):
 
         if model_provider in ["openai", "anthropic", "google_genai"]:
             return init_chat_model(model=model, model_provider=model_provider, temperature=0.0)
-        
+        elif model_provider == "huggingface":
+            if "VideoLLaMA" in model:
+                from social_memory.pipelines.videollama2 import VideoLLaMA2ChatModel
+                return VideoLLaMA2ChatModel(model_id=model)
+            else:
+                from langchain_huggingface import HuggingFacePipeline
+                task = "image-text-to-text" if any(
+                    k in model for k in ["llava", "idefics", "qwen-vl", "Qwen2-VL"]
+                ) else "text-generation"
+                return HuggingFacePipeline.from_model_id(
+                    model_id=model,
+                    task=task,
+                    pipeline_kwargs={"max_new_tokens": 512},
+                )
         else:
             # OpenRouter
             return ChatOpenAI(
