@@ -48,7 +48,30 @@ def _build_video_messages(inputs: dict) -> list:
 
 PROMPT_TEMPLATE_VIDEO = RunnableLambda(_build_video_messages)
 
+def _build_audio_messages(inputs: dict) -> list:
+    return [
+        SystemMessage(content=(
+            "You are a audio analysis assistant. "
+            "I will provide an audio recording and a question. "
+            "You MUST answer the question using ONLY the index (0, 1, 2, or 3) of the most likely correct answer."
+        )),
+        HumanMessage(content=[
+            {"type": "media", "mime_type": inputs["mime_type"], "file_uri": inputs["audio_uri"]},
+            {"type": "text", "text": f"QUESTION:\n{inputs['question']}\n\nANSWER CHOICES (Choose one):\n{inputs['options']}"},
+        ]),
+    ]
+
+
+AUDIO_SYSTEM_PROMPT = (
+    "You are a video analysis assistant. "
+    "I will provide an audio recording and a question. "
+    "You MUST answer the question using ONLY the index (0, 1, 2, or 3) of the most likely correct answer."
+)
+
+PROMPT_TEMPLATE_AUDIO = RunnableLambda(_build_audio_messages)
+
 PROMPT_REGISTRY = {
     PipelineNames.LANGUAGE: PROMPT_TEMPLATE_TRANSCRIPT,
     PipelineNames.VIDEO: PROMPT_TEMPLATE_VIDEO,
+    PipelineNames.AUDIO: PROMPT_TEMPLATE_AUDIO,
 }
