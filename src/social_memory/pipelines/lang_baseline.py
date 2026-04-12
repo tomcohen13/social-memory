@@ -22,7 +22,7 @@ class LanguagePipeline(Pipeline):
         Load LLM runner, restricting output tokens and with exponential-backoff retry.
         """
         llm = self._load_model()
-        llm_with_retry = llm.bind(max_tokens=50).with_retry(wait_exponential_jitter=True, stop_after_attempt=4)
+        llm_with_retry = llm.with_retry(wait_exponential_jitter=True, stop_after_attempt=4)
         self.model_runner = self.prompt_template | llm_with_retry
 
     async def process_inputs(self, dataset: pd.DataFrame) -> List[Dict[str, str]]:
@@ -39,7 +39,7 @@ class LanguagePipeline(Pipeline):
         Return: iterable object with inputs (dict) ready for model processing
         """
 
-        if os.path.exists(self.path_to_output):
+        if os.path.exists(self.path_to_output) and os.path.getsize(self.path_to_output) > 0:
             self.logger.info("loading previous results...")
             prev_results = pd.read_json(self.path_to_output, lines=True)
             ids_to_skip = set(prev_results['qid'].unique())

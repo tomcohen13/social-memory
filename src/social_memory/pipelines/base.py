@@ -166,12 +166,17 @@ class Pipeline(ABC):
         """Load LLM with restrictions"""
 
         model_provider, model = self.configs.model.split(":")
+        normalized_provider = model_provider.replace("-", "_")
 
-        if model_provider in ["openai", "anthropic", "google_genai"]:
-            return init_chat_model(model=model, model_provider=model_provider, temperature=0.0)
-        
+        if normalized_provider in ["openai", "anthropic"]:
+            return init_chat_model(model=model, model_provider=normalized_provider, temperature=0.0, max_tokens=50)
+
+        elif normalized_provider == "google_genai":
+            return init_chat_model(model=model, model_provider=normalized_provider, temperature=0.0, max_output_tokens=2048)
+
         else:
             # OpenRouter
+            from langchain_openai import ChatOpenAI
             return ChatOpenAI(
                 base_url="https://openrouter.ai/api/v1/",
                 api_key=os.getenv("OPENROUTER_API_KEY"),

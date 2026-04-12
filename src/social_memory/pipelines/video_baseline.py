@@ -19,8 +19,7 @@ class VideoPipeline(Pipeline):
 
     def _load_model_runner(self) -> None:
         llm = self._load_model()
-        # TODO: move max_tokens, retry to _load_model function?
-        llm_with_retry = llm.bind(max_tokens=50).with_retry(wait_exponential_jitter=True, stop_after_attempt=4)
+        llm_with_retry = llm.with_retry(wait_exponential_jitter=True, stop_after_attempt=4)
         self.model_runner = self.prompt_template | llm_with_retry
 
     async def process_inputs(self, dataset: pd.DataFrame) -> List[Dict]:
@@ -36,7 +35,7 @@ class VideoPipeline(Pipeline):
         Return: iterable object with inputs (dict) ready for model processing
         """
 
-        if os.path.exists(self.path_to_output):
+        if os.path.exists(self.path_to_output) and os.path.getsize(self.path_to_output) > 0:
             self.logger.info("loading previous results...")
             prev_results = pd.read_json(self.path_to_output, lines=True)
             ids_to_skip = set(prev_results['qid'].unique())
