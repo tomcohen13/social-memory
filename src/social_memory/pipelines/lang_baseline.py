@@ -94,13 +94,14 @@ class LanguagePipeline(Pipeline):
                     self.logger.error(f"There was an issue with: {inputs[i]['qid']}, error: {res}")
                     errors += 1
             else:
-                # if isinstance(review, (Exception, ValueError, ValidationError)):
                 self.logger.error(f"There was an issue with: {inputs[i]['qid']}, error: {res}")
                 errors += 1
 
             if len(unsaved) >= 10:
                 self.write_results_to_json(unsaved)
                 unsaved = []
+        if unsaved:
+            self.write_results_to_json(unsaved)
             
         self.logger.info(f"Finished processing: {len(inputs)} inputs | errors: {errors}")
         return results

@@ -4,7 +4,6 @@ import re
 import pandas as pd
 from typing import List, Dict
 
-from langchain.chat_models import init_chat_model
 from langchain_core.runnables import RunnableConfig
 from langchain_core.messages import AIMessage
 from tqdm.asyncio import tqdm
@@ -15,6 +14,10 @@ from social_memory.utils import load_videos
 
 
 class VideoPipeline(Pipeline):
+    """
+    Video-only pipeline (i.e., audio is stripped from videos)
+    """
+
     NAME = PipelineNames.VIDEO
 
     def _load_model_runner(self) -> None:
@@ -44,7 +47,8 @@ class VideoPipeline(Pipeline):
 
         videos = load_videos(
             video_ids=set(dataset['vid_name'].unique()) - ids_to_skip,
-            max_workers=self.configs.max_concurrency
+            max_workers=self.configs.max_concurrency,
+            with_audio=False,
         )
 
         inputs = [
