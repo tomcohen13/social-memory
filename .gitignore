@@ -210,7 +210,9 @@ marimo/_lsp/
 __marimo__/
 
 # Data directory (datasets, media, etc.)
-datasets/
+datasets/*
+!datasets/validation_augmented/
+datasets/validation_augmented/video/
 hw/
 results/
 logs/
