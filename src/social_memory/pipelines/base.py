@@ -1,14 +1,18 @@
 """Base pipeline module"""
 import os
+import re
 import sys
 import logging
 
 from abc import ABC, abstractmethod
 from datetime import datetime
 from langchain.chat_models import BaseChatModel, init_chat_model
+from langchain_core.messages import AIMessage
+from langchain_core.runnables import RunnableConfig
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 from typing import Dict, List
+from tqdm.asyncio import tqdm
 
 from social_memory.constants import RESULTS_DIR
 from social_memory.prompts import PROMPT_REGISTRY
@@ -176,7 +180,6 @@ class Pipeline(ABC):
 
         else:
             # OpenRouter
-            from langchain_openai import ChatOpenAI
             return ChatOpenAI(
                 base_url="https://openrouter.ai/api/v1/",
                 api_key=os.getenv("OPENROUTER_API_KEY"),
@@ -205,10 +208,50 @@ class Pipeline(ABC):
         raise NotImplementedError
 
 
-    @abstractmethod
-    async def run_model_on_inputs(self, inputs: List[Dict[str, str]]):
-        """Should be implemented by inheriting classes"""
-        raise NotImplementedError
+    async def run_model_on_inputs(self, inputs: List[Dict]):
+        """
+        Execute selected model on inputs concurrently
+        """
+        config = RunnableConfig(max_concurrency=self.configs.max_concurrency)
+
+        results: List[dict] = []
+        unsaved: List[dict] = []
+        errors = 0
+
+        async for i, res in tqdm(
+            iterable=self.model_runner.abatch_as_completed(
+                inputs=inputs,
+                config=config,
+                return_exceptions=True
+            ),
+            total=len(inputs),
+            desc=f"Running model {self.configs.model}..."
+        ):
+            if isinstance(res, AIMessage):
+                text = res.content if isinstance(res.content, str) else str(res.content)
+                self.logger.info(f"[{inputs[i]['qid']}] {text!r}")
+                match = re.search(r'[0-3]', text)
+                if match:
+                    entry = {"qid": inputs[i]["qid"], "result": int(match.group())}
+                    results.append(entry)
+                    unsaved.append(entry)
+                else:
+                    self.logger.error(f"Could not parse result for {inputs[i]['qid']}: {text!r}")
+                    errors += 1
+            else:
+                self.logger.error(f"There was an issue with: {inputs[i]['qid']}, error: {res}")
+                errors += 1
+
+            if len(unsaved) >= 10:
+                self.write_results_to_json(unsaved)
+                unsaved = []
+
+        if unsaved:
+            self.write_results_to_json(unsaved)
+
+        self.logger.info(f"Finished processing: {len(inputs)} inputs | errors: {errors}")
+        return results
+
 
 
     async def run(self) -> None:
