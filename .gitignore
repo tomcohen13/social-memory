@@ -211,6 +211,7 @@ __marimo__/
 
 # Data directory (datasets, media, etc.)
 datasets/
+!datasets/socialiq2/siq2_augmented/**
 hw/
 results/
 logs/
