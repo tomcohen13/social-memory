@@ -6,7 +6,7 @@ from moviepy.editor import VideoFileClip
 from pathlib import Path
 
 BUFFER_TIME = 10 # seconds
-TEST_SET_DIR = Path("datasets/socialiq2/siq2/validation_augmented")
+TEST_SET_DIR = Path("datasets/validation_augmented")
 
 qa = pd.read_json(TEST_SET_DIR / "qa_augmented.json", lines=True)
 with open(TEST_SET_DIR.parent / "trims.json", "r") as j:
