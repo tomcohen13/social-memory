@@ -95,6 +95,13 @@ Five models across **Google (Gemini)**, **OpenAI**, **Meta (Llama)**, and **Qwen
 <td align="right"><strong>73.81%</strong></td>
 </tr>
 <tr>
+<tr>
+<td align="left"><img src="assets/openai.svg" width="22" height="22" alt="Google" valign="middle" /></td>
+<td align="left"><code>gpt-4o-preview</code></td>
+<td align="center"><code>audio</code></td>
+<td align="right"><strong>70.86%</strong></td>
+</tr>
+<tr>
 <td align="left"><img src="assets/meta.svg" width="22" height="22" alt="Meta" valign="middle" /></td>
 <td align="left"><code>Llama 3.3 70B</code></td>
 <td align="center"><code>text</code></td>
