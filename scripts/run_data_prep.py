@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from scripts.data_augmentation.data_prep import run
+from social_memory.data_augmentation.data_prep import run
 
 parser = argparse.ArgumentParser(description="Augment qa_augmented.json with scene-context questions")
 parser.add_argument("--model",           type=str, default="gemini-2.5-pro")
