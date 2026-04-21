@@ -202,7 +202,17 @@ def load_audios(
         return dict(pool.map(worker, video_ids))
 
 
-def compute_correctness(df):
+def compute_correctness(df: pd.DataFrame) -> float:
+    """Compute fraction of valid predictions that match the gold answer index.
+
+    Args:
+        df: DataFrame with columns ``result`` (model predictions) and
+            ``answer_idx`` (gold labels). Either column may contain ``pd.NA``
+            or non-numeric values.
+
+    Returns:
+        Accuracy as a float in [0, 1], or ``pd.NA`` if no valid predictions exist.
+    """
     # Coerce to numeric so int answer_idx vs object `result` (pd.NA + ints) does not hit
     # NAType in == (TypeError: boolean value of NA is ambiguous).
     predicted = pd.to_numeric(df["result"], errors="coerce")

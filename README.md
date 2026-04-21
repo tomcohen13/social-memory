@@ -119,6 +119,12 @@ Five models across **Google (Gemini)**, **OpenAI**, **Meta (Llama)**, and **Qwen
 <td align="center"><code>text</code></td>
 <td align="right"><strong>58.31%</strong></td>
 </tr>
+<tr>
+<td align="left"><img src="assets/nvidia.svg" width="22" height="22" alt="NVIDIA" valign="middle" /></td>
+<td align="left"><code>Nemotron Nano 12B 2 VL</code></td>
+<td align="center"><code>video</code></td>
+<td align="right"><strong>51.53%</strong></td>
+</tr>
 </tbody>
 </table>
 
