@@ -1,19 +1,14 @@
 """Test zero-shot performance of LLMs on video data"""
 import os
-import re
 import pandas as pd
 from typing import List, Dict
 
-from langchain_core.runnables import RunnableConfig
-from langchain_core.messages import AIMessage
-from tqdm.asyncio import tqdm
-
 from social_memory.constants import PipelineNames
-from social_memory.pipelines.base import Pipeline
+from social_memory.pipelines.base import BasePipeline
 from social_memory.utils import load_videos
 
 
-class VideoPipeline(Pipeline):
+class VideoPipeline(BasePipeline):
     """
     Video-only pipeline (i.e., audio is stripped from videos)
     """

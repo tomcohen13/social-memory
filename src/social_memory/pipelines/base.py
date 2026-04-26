@@ -9,7 +9,6 @@ from datetime import datetime
 from langchain.chat_models import BaseChatModel, init_chat_model
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableConfig
-from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 from typing import Dict, List
 from tqdm.asyncio import tqdm
@@ -48,7 +47,7 @@ class PipelineConfig(BaseModel):
         return PipelineConfig(**config_dict)
 
 
-class Pipeline(ABC):
+class BasePipeline(ABC):
     """Initialize the Pipeline with models, dataset, logger, and configurations."""
 
     NAME: str = ""
@@ -142,6 +141,7 @@ class Pipeline(ABC):
             self.NAME,
             self.configs.model,
             self.configs.split,
+            self.run_id,
             f"results.jsonl",
         )
         if create_if_not_existent:
@@ -206,6 +206,14 @@ class Pipeline(ABC):
         raise NotImplementedError
 
 
+    async def transform_inputs(self, inputs: List[dict]) -> List[dict]:
+        """
+        Optional post-processing of inputs before running model. Can be overridden by inheriting class if needed.
+        By default, returns results as-is.
+        """
+        return inputs
+
+
     async def run_model_on_inputs(self, inputs: List[Dict]):
         """
         Execute selected model on inputs concurrently
@@ -264,6 +272,8 @@ class Pipeline(ABC):
         
         self.logger.info("Preparing inputs...")
         inputs = await self.process_inputs(dataset)
+
+        inputs = await self.transform_inputs(inputs)
 
         self.logger.info(f"Processing {len(inputs)} documents.")
         results: List[dict] = await self.run_model_on_inputs(inputs)

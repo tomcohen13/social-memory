@@ -7,11 +7,11 @@ from typing import List, Dict
 from tqdm import tqdm
 
 from social_memory.constants import PipelineNames
-from social_memory.pipelines.base import Pipeline
+from social_memory.pipelines.base import BasePipeline
 from social_memory.utils import load_audios
 
 
-class AudioPipeline(Pipeline):
+class AudioPipeline(BasePipeline):
     NAME = PipelineNames.AUDIO
 
     def _load_model_runner(self) -> None:

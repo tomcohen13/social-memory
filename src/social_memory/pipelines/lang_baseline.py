@@ -3,17 +3,12 @@ import os
 import pandas as pd
 from typing import List, Dict
 
-from langchain.chat_models import init_chat_model
-from langchain_core.runnables import RunnableConfig
-from langchain_core.messages import AIMessage
-from tqdm.asyncio import tqdm
-
 from social_memory.constants import PipelineNames
-from social_memory.pipelines.base import Pipeline
+from social_memory.pipelines.base import BasePipeline
 from social_memory.utils import load_transcripts
 
 
-class LanguagePipeline(Pipeline):
+class LanguagePipeline(BasePipeline):
 
     NAME = PipelineNames.LANGUAGE
 
@@ -65,43 +60,3 @@ class LanguagePipeline(Pipeline):
             self.logger.warning(f"{len(dataset) - len(inputs)} were missing a transcript and will be skipped.")
         
         return inputs
-
-
-    async def run_model_on_inputs(self, inputs: List[Dict[str, str]]):
-        """
-        Execute selected model on inputs concurrently
-        """
-
-        # set up concurrency configs 
-        config = RunnableConfig(max_concurrency=self.configs.max_concurrency)
-
-        results: List[dict] = []
-        unsaved: List[dict] = []
-        errors = 0
-
-        async for i, res in tqdm(
-            self.model_runner.abatch_as_completed(inputs=inputs, config=config, return_exceptions=True),
-            total=len(inputs),
-            desc=f"Running model {self.configs.model}..."
-        ):
-            if isinstance(res, AIMessage):
-                try:
-                    result = int(res.content)
-                    entry = {"qid": inputs[i]["qid"], "result": result}
-                    results.append(entry)
-                    unsaved.append(entry)
-                except:
-                    self.logger.error(f"There was an issue with: {inputs[i]['qid']}, error: {res}")
-                    errors += 1
-            else:
-                self.logger.error(f"There was an issue with: {inputs[i]['qid']}, error: {res}")
-                errors += 1
-
-            if len(unsaved) >= 10:
-                self.write_results_to_json(unsaved)
-                unsaved = []
-        if unsaved:
-            self.write_results_to_json(unsaved)
-            
-        self.logger.info(f"Finished processing: {len(inputs)} inputs | errors: {errors}")
-        return results
