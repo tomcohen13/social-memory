@@ -1,0 +1,7 @@
+pipeline: video_clipped
+model: google_genai:gemini-2.5-flash
+split: demo
+max_concurrency: 6
+transform_configs:
+  clip_around_oracle:
+    output_length: 300

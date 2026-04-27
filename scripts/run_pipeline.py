@@ -28,8 +28,7 @@ parser.add_argument(
 parser.add_argument(
     "--model",
     type=str,
-    required=True,
-    default=":".join([DEFAULT_MODEL_PROVIDER, DEFAULT_MODEL]),
+    # default=":".join([DEFAULT_MODEL_PROVIDER, DEFAULT_MODEL]),
 )
 parser.add_argument(
     "--split",
@@ -44,19 +43,35 @@ parser.add_argument(
     default=2,
     help="Max concurrent requests to llm",
 )
+parser.add_argument(
+    "--conf",
+    type=str,
+    required=False,
+    help="Path to yaml file with pipeline configurations. Command-line args will override yaml configs.",
+)
 
 args = parser.parse_args()
 
 async def main():
-    configs = PipelineConfig(
-        model=args.model,
-        split=args.split,
-        max_concurrency=args.max_concurrency,
-    )
-    if args.pipeline not in PIPELINE_REGISTRY:
-        raise ValueError(f"No pipeline found for key: {args.pipeline}")
     
-    pipeline_cls = PIPELINE_REGISTRY[args.pipeline]
+    raw = {}
+    
+    if args.conf:
+        import yaml
+        raw = yaml.safe_load(open(args.conf))
+    
+    # override yaml configs with command-line args if provided
+    for arg in ["model", "split", "max_concurrency", "pipeline"]:
+        if cli_value := getattr(args, arg):
+            raw[arg] = cli_value
+    
+    pipeline_name = raw.pop("pipeline")
+    configs = PipelineConfig(**raw)
+    
+    if pipeline_name not in PIPELINE_REGISTRY:
+        raise ValueError(f"No pipeline found for key: {pipeline_name}")
+    
+    pipeline_cls = PIPELINE_REGISTRY[pipeline_name]
     pipeline = pipeline_cls(configs=configs)
     await pipeline.run()
 

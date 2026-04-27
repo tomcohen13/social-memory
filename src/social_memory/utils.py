@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 import os
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
@@ -26,13 +25,6 @@ def load_qa_dataset(split: str) -> pd.DataFrame:
 
 def _read_vtt_file(vtt_path: Path) -> str:
     return "\n".join(caption.text for caption in webvtt.read(str(vtt_path)))
-
-
-def _load_single_transcript(vid: str, directory: Path) -> tuple[str, str]:
-    path = directory / f"{vid}.vtt"
-    if not path.is_file():
-        return vid, ""
-    return vid, _read_vtt_file(path)
 
 
 def load_transcripts(
@@ -63,46 +55,6 @@ def load_transcripts(
         return dict(pool.map(worker, video_ids))
 
 
-def _load_single_video(vid: str, directory: Path, with_audio: bool = True) -> tuple[str, str]:
-    """
-    Load a single .mp4 video file as a base64-encoded string.
-
-    Args:
-        vid: Video ID (filename without extension).
-        directory: Directory containing the .mp4 files.
-        with_audio: If True, includes audio. If False, returns video only (audio removed).
-
-    Returns:
-        Tuple of (video ID, base64-encoded video string). If the file is missing, the value is an empty string.
-    """
-    path = directory / f"{vid}.mp4"
-    if not path.is_file():
-        return vid, ""
-
-    if with_audio:
-        with open(path, "rb") as f:
-            return vid, base64.b64encode(f.read()).decode("utf-8")
-
-    # Return muted (no audio) video
-    result = subprocess.run(
-        [
-            "ffmpeg",
-            "-v", "error",
-            "-i", str(path),
-            "-map", "0:v:0",
-            "-an",
-            "-c:v", "copy",
-            "-movflags", "+frag_keyframe+empty_moov",
-            "-f", "mp4",
-            "pipe:1",
-        ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=True,
-    )
-    return vid, base64.b64encode(result.stdout).decode("utf-8")
-
-
 def load_videos(
     video_ids: Iterable[str],
     max_workers: int | None = 4,
@@ -131,14 +83,6 @@ def load_videos(
         return dict(pool.map(worker, video_ids))
 
 
-def _load_single_audio(vid: str, directory: Path) -> tuple[str, tuple[str, str]]:
-    for ext in ("mp3", "wav"):
-        path = directory / ext / f"{vid}.{ext}"
-        if path.is_file():
-            return vid, (str(path), ext)
-    return vid, ("", "")
-
-
 def load_audios(
     video_ids: Iterable[str],
     max_workers: int | None = 4,
@@ -164,15 +108,6 @@ def load_audios(
     worker = partial(_load_single_audio, directory=directory)
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         return dict(pool.map(worker, video_ids))
-
-
-def _load_single_audio(vid: str, directory: Path) -> tuple[str, tuple[str, str]]:
-    mime_map = {"mp3": "audio/mpeg", "wav": "audio/wav"}
-    for ext in ("mp3", "wav"):
-        path = directory / ext / f"{vid}.{ext}"
-        if path.is_file():
-            return vid, (str(path), mime_map[ext])
-    return vid, ("", "")
 
 
 def load_audios(
@@ -224,3 +159,12 @@ def compute_correctness(df: pd.DataFrame) -> float:
     if n_total == 0:
         return pd.NA
     return n_correct / n_total
+
+
+def get_duration(filename: str) -> float:
+    """Get duration of video file in seconds using ffprobe."""
+    cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", filename]
+    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    return float(result.stdout)
+
+

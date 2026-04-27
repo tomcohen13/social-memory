@@ -1,68 +1,68 @@
-"""Test zero-shot performance of LLMs on video data"""
+"""Test zero-shot performance of LLMs on transcript-only data"""
+
 from typing import List, Dict
 
 from social_memory.constants import PipelineNames
 from social_memory.pipelines.base import BasePipeline
 from social_memory.transforms import apply_transform_with_concurrency
-from social_memory.transforms.video import load_video, encode_video
+from social_memory.transforms.text import load_transcript
 
-class VideoPipeline(BasePipeline):
-    """
-    Video-only pipeline (i.e., audio is stripped from videos)
-    """
+class LanguagePipeline(BasePipeline):
 
-    NAME = PipelineNames.VIDEO
+    NAME = PipelineNames.LANGUAGE
 
     def __init__(self, configs):
         super().__init__(configs)
         
         self.transforms = [
-            load_video,
-            encode_video,
+            load_transcript,
         ]
+        
 
     def _load_model_runner(self) -> None:
+        """
+        Load LLM runner, restricting output tokens and with exponential-backoff retry.
+        """
         llm = self._load_model()
         llm_with_retry = llm.with_retry(wait_exponential_jitter=True, stop_after_attempt=4)
         self.model_runner = self.prompt_template | llm_with_retry
 
-    async def process_inputs(self, inputs: List[Dict]) -> List[Dict]:
+    async def process_inputs(self, inputs: List[Dict]) -> List[Dict[str, str]]:
         """
-        Prepare inputs as dictionaries with keys: 'qid', 'video', 'question', 'options'
+        Prepare inputs as dictionaries with keys: 'qid', 'transcript', 'question', 'options'
+
         Args:
-            dataset: a pandas dataframe, assumed to have the following columns:
+            inputs: a list of dictionaries, each containing the following keys:
                 qid (str): question id
                 vid_name (str): the video id
                 q (str): question content
                 a0, a1, a2, a3: answer options
-
+        
         Return: iterable object with inputs (dict) ready for model processing
         """
-
+        
         num_inputs_before = len(inputs)
-
+        
         for transform in self.transforms:
             # apply each transform to inputs using max_concurrency workers
-            transform_name = getattr(transform, "__name__", getattr(getattr(transform, "func", None), "__name__", "unknown"))
-            self.logger.info(f"Applying transform {transform_name}...")
-
+            self.logger.info(f"Applying transform {transform.__name__}...")
             inputs = await apply_transform_with_concurrency(
-                transform,
-                inputs,
-                self.configs.max_concurrency
+                transform=transform,
+                inputs=inputs,
+                max_concurrency=self.configs.max_concurrency
             )
-
+     
         inputs = [
             {
                 "qid": input["qid"],
-                "video": input["video"],
+                "transcript": input["transcript"],
                 "question": input["q"],
                 "options": "\n".join([f"{i}: {input[f'a{i}']}" for i in range(4)])
             }
             for input in inputs
-            if input.get("video")
+            if input["transcript"] != ""
         ]
         if len(inputs) < num_inputs_before:
-            self.logger.warning(f"{num_inputs_before - len(inputs)} were missing a video and will be skipped.")
-
+            self.logger.warning(f"{num_inputs_before - len(inputs)} were missing a transcript and will be skipped.")
+        
         return inputs

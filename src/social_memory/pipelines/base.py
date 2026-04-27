@@ -10,7 +10,7 @@ from langchain.chat_models import BaseChatModel, init_chat_model
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel
-from typing import Dict, List
+from typing import Callable, Dict, List
 from tqdm.asyncio import tqdm
 
 from social_memory.constants import RESULTS_DIR
@@ -25,6 +25,7 @@ class PipelineConfig(BaseModel):
     split: str
     max_concurrency: int = 4
     debug: bool = False
+    transform_configs: Dict = {}  # optional dict of configs to be passed to respective transform functions.
 
     def to_yaml(self, path: str) -> None:
         """Writes config object to yaml file"""
@@ -59,6 +60,7 @@ class BasePipeline(ABC):
         self.path_to_output = self._create_output_file_path()
         self.model_runner = None
         self.prompt_template = None
+        self.transforms: List[Callable] = []  # list of functions to apply to inputs before running model
 
         self._load_prompt_template()  # updates self.prompt_template
         self._load_model_runner()  # updates self.model_runner
@@ -173,7 +175,7 @@ class BasePipeline(ABC):
         normalized_provider = model_provider.replace("-", "_")
 
         if normalized_provider in ["openai", "anthropic", "google_genai"]: 
-            return init_chat_model(model=model, model_provider=normalized_provider, temperature=0.0, max_output_tokens=2048)
+            return init_chat_model(model=model, model_provider=normalized_provider, temperature=0.0, max_tokens=2048)
 
         else:
             # OpenRouter
@@ -204,14 +206,6 @@ class BasePipeline(ABC):
         Custom inputs preprocessing. Should return an Iterable of inputs.
         """
         raise NotImplementedError
-
-
-    async def transform_inputs(self, inputs: List[dict]) -> List[dict]:
-        """
-        Optional post-processing of inputs before running model. Can be overridden by inheriting class if needed.
-        By default, returns results as-is.
-        """
-        return inputs
 
 
     async def run_model_on_inputs(self, inputs: List[Dict]):
@@ -268,12 +262,10 @@ class BasePipeline(ABC):
 
         # load split of QA dataset into dataframe
         self.logger.info("loading dataset...")
-        dataset = load_qa_dataset(split=self.configs.split)
-        
-        self.logger.info("Preparing inputs...")
-        inputs = await self.process_inputs(dataset)
+        inputs = load_qa_dataset(split=self.configs.split).to_dict(orient='records')
 
-        inputs = await self.transform_inputs(inputs)
+        self.logger.info("Preparing inputs...")
+        inputs = await self.process_inputs(inputs)
 
         self.logger.info(f"Processing {len(inputs)} documents.")
         results: List[dict] = await self.run_model_on_inputs(inputs)

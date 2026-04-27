@@ -1,0 +1,4 @@
+pipeline: video
+model: google_genai:gemini-2.5-pro
+split: demo
+max_concurrency: 4
