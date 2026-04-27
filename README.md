@@ -139,6 +139,27 @@ Five models across **Google (Gemini)**, **OpenAI**, **Meta (Llama)**, and **Qwen
 
 ---
 
+## Update: composable transforms
+
+Each pipeline now supports a `self.transforms` list — ordered `Callable[[dict], dict]` functions applied concurrently to every input row before the model runs. Transforms receive the full row dict (video id, oracle timestamps, question, options, etc.) and return an updated version of it; config params are pre-bound via `functools.partial`.
+
+**Example — `video_clipped`:** clips each video to a 5-minute window around the ground-truth oracle segment before sending it to the model.
+
+```python
+class VideoClippedPipeline(VideoPipeline):
+    def __init__(self, configs):
+        super().__init__(configs)
+        self.transforms = [
+            load_video,
+            partial(clip_around_oracle, **configs.transform_configs.get("clip_around_oracle", {})),
+            encode_video,
+        ]
+```
+
+Transform parameters (e.g. `output_length`) are set in the experiment YAML under `transform_configs` and passed through `PipelineConfig`.
+
+---
+
 ## Quick start
 
 Requires **Python 3.12–3.13** (see `pyproject.toml`). Configure API keys in `.env`, then run a pipeline via `scripts/run_pipeline.py`:
