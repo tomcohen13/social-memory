@@ -12,15 +12,21 @@ from typing import Iterable
 import pandas as pd
 import webvtt
 
-from social_memory.constants import PATH_TO_DATA, DirPaths
+from social_memory.constants import PATH_TO_DATA, DirPaths, SIQDatasetColumns
 
-def load_qa_dataset(split: str) -> pd.DataFrame:
+def load_qa_dataset(split: str, with_oracle: bool = False) -> pd.DataFrame:
     """
     Load QA dataset from json file
     """
     path = os.path.join(PATH_TO_DATA, DirPaths.QA, f"qa_{split}.json")
     print(f"trying to read file: {path}...")
     qa = pd.read_json(path, lines=True)
+    if with_oracle:
+        import json
+        with open(os.path.join(PATH_TO_DATA, "trims.json"), "r") as j:
+            oracles = json.load(j)
+            oracles = {vid: (start, start + 60.0) for vid, start in oracles.items()}
+            qa["oracle"] = qa[SIQDatasetColumns.VIDEO_ID].map(oracles)
     return qa
 
 def _read_vtt_file(vtt_path: Path) -> str:

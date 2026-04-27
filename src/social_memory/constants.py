@@ -13,7 +13,7 @@ class DirPaths(StrEnum):
     AUDIO = auto()
     VIDEO = auto()
 
-class SocialIQDatasetColumns(StrEnum):
+class SIQDatasetColumns(StrEnum):
     QID = "qid"
     VIDEO_ID = "vid_name"
     QUESTION = "q"

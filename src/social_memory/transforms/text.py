@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from social_memory.constants import PATH_TO_DATA, SocialIQDatasetColumns
+from social_memory.constants import PATH_TO_DATA, SIQDatasetColumns
 from social_memory.utils import _read_vtt_file
 
 
@@ -14,7 +14,7 @@ def load_transcript(input: dict) -> dict:
     Returns:
         input dict with an additional key "transcript" containing the transcript text.
     """
-    video_id = input[SocialIQDatasetColumns.VIDEO_ID]
+    video_id = input[SIQDatasetColumns.VIDEO_ID]
     path = Path(PATH_TO_DATA) / "transcript" / f"{video_id}.vtt"
     if not path.is_file():
         input["transcript"] = ""

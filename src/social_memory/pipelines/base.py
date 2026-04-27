@@ -262,7 +262,8 @@ class BasePipeline(ABC):
 
         # load split of QA dataset into dataframe
         self.logger.info("loading dataset...")
-        inputs = load_qa_dataset(split=self.configs.split).to_dict(orient='records')
+        inputs = load_qa_dataset(split=self.configs.split, with_oracle=True)
+        inputs = inputs.to_dict(orient='records')
 
         self.logger.info("Preparing inputs...")
         inputs = await self.process_inputs(inputs)

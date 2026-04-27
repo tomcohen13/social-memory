@@ -6,7 +6,7 @@ from typing import List, Tuple
 from social_memory.constants import (
     PATH_TO_DATA,
     PATH_TO_AUGMENTED_DATA,
-    SocialIQDatasetColumns,
+    SIQDatasetColumns,
     DirPaths,
 )
 from social_memory.utils import get_duration
@@ -56,7 +56,7 @@ def _clip_around_oracle(
 
 
 def clip_around_oracle(input: dict, output_length: int) -> dict:
-    video_id = input[SocialIQDatasetColumns.VIDEO_ID]
+    video_id = input[SIQDatasetColumns.VIDEO_ID]
     oracle = input["oracle"]
     start, end = _clip_around_oracle(video_id, oracle, output_length)
 
@@ -101,7 +101,7 @@ def load_video(
         directory: directory containing .mp4 files.
         with_audio: if False, audio is stripped via ffmpeg before storing.
     """
-    video_id = input[SocialIQDatasetColumns.VIDEO_ID]
+    video_id = input[SIQDatasetColumns.VIDEO_ID]
     path = directory / f"{video_id}.mp4"
 
     if not path.is_file():
