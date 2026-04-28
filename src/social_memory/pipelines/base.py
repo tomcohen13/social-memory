@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from typing import Callable, Dict, List
 from tqdm.asyncio import tqdm
 
-from social_memory.constants import RESULTS_DIR
+from social_memory.constants import GCS_PREFIX, RESULTS_DIR
 from social_memory.prompts import PROMPT_REGISTRY
 from social_memory.utils import load_qa_dataset
 
@@ -27,7 +27,7 @@ class PipelineConfig(BaseModel):
     debug: bool = False
     transform_configs: Dict = {}  # optional dict of configs to be passed to respective transform functions.
     gcs_bucket: str | None = None  # GCS bucket; defaults to GCS_BUCKET env var if not set
-    gcs_prefix: str = "siq2/video"  # path prefix within the bucket
+    gcs_prefix: str = GCS_PREFIX  # path prefix within the bucket
 
     def model_post_init(self, __context) -> None:
         if not self.gcs_bucket:

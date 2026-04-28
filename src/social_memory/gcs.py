@@ -22,11 +22,6 @@ def default_bucket() -> str:
     return bucket
 
 
-def default_prefix() -> str:
-    import os
-    return os.getenv("GCS_PREFIX", "siq2/video")
-
-
 def video_blob_name(video_id: str, prefix: str) -> str:
     return f"{prefix}/{video_id}.mp4"
 

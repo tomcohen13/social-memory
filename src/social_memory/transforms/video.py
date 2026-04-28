@@ -4,11 +4,13 @@ from pathlib import Path
 from typing import List, Tuple
 
 from social_memory.constants import (
+    GCS_PREFIX,
     PATH_TO_DATA,
     PATH_TO_AUGMENTED_DATA,
     SIQDatasetColumns,
     DirPaths,
 )
+from social_memory.gcs import download_to_temp, video_blob_name
 from social_memory.utils import get_duration
 
 
@@ -24,7 +26,7 @@ def _clip_around_oracle(
     the remaining expansion is applied to the other side. Returns (0, duration) for videos
     shorter than `output_length`.
     """
-    full_video_path = f"{PATH_TO_AUGMENTED_DATA}/video/{video_id}.mp4"
+    full_video_path = PATH_TO_AUGMENTED_DATA / "video" / f"{video_id}.mp4"
     duration = get_duration(full_video_path)
     if duration < output_length:
         print(f"Skipping {video_id} due to short duration: {duration} seconds < {output_length} seconds")
@@ -87,7 +89,7 @@ def clip_around_oracle(input: dict, output_length: int) -> dict:
 
 def load_video(
     input: dict,
-    directory: Path = Path(PATH_TO_DATA) / DirPaths.VIDEO,
+    directory: Path = PATH_TO_DATA / DirPaths.VIDEO,
     with_audio: bool = True,
 ) -> dict:
     """
@@ -143,7 +145,7 @@ def encode_video(input: dict) -> dict:
 def load_video_from_gcs(
     input: dict,
     bucket_name: str,
-    prefix: str = "siq2/video",
+    prefix: str = GCS_PREFIX,
     with_audio: bool = True,
 ) -> dict:
     """
@@ -159,7 +161,6 @@ def load_video_from_gcs(
         prefix: path prefix within the bucket (default: "siq2/video").
         with_audio: if False, audio is stripped before storing.
     """
-    from social_memory.gcs import download_to_temp, video_blob_name
 
     video_id = input[SIQDatasetColumns.VIDEO_ID]
 

@@ -1,9 +1,7 @@
 """Text transforms"""
 
-from pathlib import Path
-
 from social_memory.constants import PATH_TO_DATA, SIQDatasetColumns
-from social_memory.utils import _read_vtt_file
+from social_memory.utils import read_vtt_file
 
 
 def load_transcript(input: dict) -> dict:
@@ -15,11 +13,11 @@ def load_transcript(input: dict) -> dict:
         input dict with an additional key "transcript" containing the transcript text.
     """
     video_id = input[SIQDatasetColumns.VIDEO_ID]
-    path = Path(PATH_TO_DATA) / "transcript" / f"{video_id}.vtt"
+    path = PATH_TO_DATA / "transcript" / f"{video_id}.vtt"
     if not path.is_file():
         input["transcript"] = ""
     else:
-        input["transcript"] = _read_vtt_file(path)
+        input["transcript"] = read_vtt_file(path)
     return input
 
 

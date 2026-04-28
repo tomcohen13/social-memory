@@ -24,8 +24,11 @@ import json
 import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-
 from tqdm import tqdm
+from yt_dlp import YoutubeDL
+
+from social_memory.constants import ORIGINAL_SPLITS_FILE
+from social_memory.gcs import blob_exists, upload_file, video_blob_name
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _DATA_DIR  = _REPO_ROOT / "datasets" / "socialiq2" / "siq2"
@@ -36,7 +39,6 @@ _DATA_DIR  = _REPO_ROOT / "datasets" / "socialiq2" / "siq2"
 # ---------------------------------------------------------------------------
 
 def _download_video(vid_id: str, cache_path: str, cookies_from_browser: str | None) -> str | None:
-    from yt_dlp import YoutubeDL
 
     ydl_opts = {
         'format': 'best[height<=360][ext=mp4]',
@@ -65,7 +67,6 @@ def _process_video(
     cookies_from_browser: str | None,
 ) -> str:
     """Download and upload one video. Returns vid_id on success, '' on failure."""
-    from social_memory.gcs import blob_exists, upload_file, video_blob_name
 
     blob = video_blob_name(vid_id, prefix)
 
@@ -86,7 +87,8 @@ def _process_video(
 # ---------------------------------------------------------------------------
 
 def _load_vid_ids_from_split(data_dir: Path, splits: list[str]) -> list[str]:
-    with open(data_dir / "original_split.json") as f:
+    """Load video IDs from the original_split.json for the specified splits."""
+    with open(data_dir / ORIGINAL_SPLITS_FILE) as f:
         split_data = json.load(f)
     vid_ids: list[str] = []
     for subset in split_data["subsets"].values():
