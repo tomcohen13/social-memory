@@ -4,6 +4,9 @@ import re
 import sys
 import logging
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from abc import ABC, abstractmethod
 from datetime import datetime
 from langchain.chat_models import BaseChatModel, init_chat_model

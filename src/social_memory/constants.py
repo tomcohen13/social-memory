@@ -24,6 +24,7 @@ class SIQDatasetColumns(StrEnum):
     QID = "qid"
     VIDEO_ID = "vid_name"
     VIDEO_RAW = "video_raw"
+    VIDEO = "video"
     QUESTION = "q"
     ANSWER_0 = "a0"
     ANSWER_1 = "a1"

@@ -1,12 +1,11 @@
+"""Video transforms"""
 import base64
 import subprocess
 from pathlib import Path
 from typing import List, Tuple
 
 from social_memory.constants import (
-    GCS_PREFIX,
     PATH_TO_DATA,
-    PATH_TO_AUGMENTED_DATA,
     SIQDatasetColumns,
     DirPaths,
 )
@@ -14,10 +13,11 @@ from social_memory.gcs import download_to_temp, video_blob_name
 from social_memory.utils import get_duration
 
 
-def _clip_around_oracle(
+def _compute_clip_window(
     video_id: str,
     oracle: Tuple[int, int] | List[int],
     output_length: int,
+    duration: float,
 ) -> Tuple[int, int]:
     """
     Return a (start, end) window of `output_length` seconds centered around the oracle segment.
@@ -26,8 +26,6 @@ def _clip_around_oracle(
     the remaining expansion is applied to the other side. Returns (0, duration) for videos
     shorter than `output_length`.
     """
-    full_video_path = PATH_TO_AUGMENTED_DATA / "video" / f"{video_id}.mp4"
-    duration = get_duration(full_video_path)
     if duration < output_length:
         print(f"Skipping {video_id} due to short duration: {duration} seconds < {output_length} seconds")
         return 0, duration
@@ -58,11 +56,25 @@ def _clip_around_oracle(
 
 
 def clip_around_oracle(input: dict, output_length: int) -> dict:
-    video_id = input[SIQDatasetColumns.VIDEO_ID]
-    oracle = input["oracle"]
-    start, end = _clip_around_oracle(video_id, oracle, output_length)
+    """
+    Clip a video to desired length around oracle.
 
-    raw: bytes | None = input.get("video_raw")
+    Args:
+        input: dict with keys "video_id", "oracle", and "duration".
+        output_length: desired output length, in seconds.
+    Returns:
+        input dict with "video_raw" replaced by the clipped video bytes.
+    
+    Note: this transform assumes the full video bytes are already loaded in input["video_raw"].
+    """
+    start, end = _compute_clip_window(
+        video_id=input[SIQDatasetColumns.VIDEO_ID],
+        oracle=input["oracle"],
+        output_length=output_length,
+        duration=input["duration"]
+    )
+
+    raw: bytes | None = input.get(SIQDatasetColumns.VIDEO_RAW)
     if raw is None:
         return input
 
@@ -83,7 +95,7 @@ def clip_around_oracle(input: dict, output_length: int) -> dict:
         stderr=subprocess.PIPE,
         check=True,
     )
-    input["video_raw"] = result.stdout
+    input[SIQDatasetColumns.VIDEO_RAW] = result.stdout
     return input
 
 
@@ -107,12 +119,14 @@ def load_video(
     path = directory / f"{video_id}.mp4"
 
     if not path.is_file():
-        input["video_raw"] = None
+        input[SIQDatasetColumns.VIDEO_RAW] = None
         return input
+
+    input["duration"] = get_duration(path)
 
     if with_audio:
         with open(path, "rb") as f:
-            input["video_raw"] = f.read()
+            input[SIQDatasetColumns.VIDEO_RAW] = f.read()
         return input
 
     result = subprocess.run(
@@ -131,21 +145,21 @@ def load_video(
         stderr=subprocess.PIPE,
         check=True,
     )
-    input["video_raw"] = result.stdout
+    input[SIQDatasetColumns.VIDEO_RAW] = result.stdout
     return input
 
 
 def encode_video(input: dict) -> dict:
-    """Convert input["video_raw"] bytes to a base64 string in input["video"]."""
-    raw: bytes | None = input.pop("video_raw", None)
-    input["video"] = base64.b64encode(raw).decode("utf-8") if raw is not None else None
+    """Convert input["video_raw"] bytes to a base64 string in input[SIQDatasetColumns.VIDEO]."""
+    raw: bytes | None = input.pop(SIQDatasetColumns.VIDEO_RAW, None)
+    input[SIQDatasetColumns.VIDEO] = base64.b64encode(raw).decode("utf-8") if raw else None
     return input
 
 
 def load_video_from_gcs(
     input: dict,
     bucket_name: str,
-    prefix: str = GCS_PREFIX,
+    prefix: str,
     with_audio: bool = True,
 ) -> dict:
     """
@@ -166,8 +180,10 @@ def load_video_from_gcs(
 
     with download_to_temp(bucket_name, video_blob_name(video_id, prefix)) as tmp_path:
         if tmp_path is None:
-            input["video_raw"] = None
+            input[SIQDatasetColumns.VIDEO_RAW] = None
             return input
+
+        input["duration"] = get_duration(tmp_path)
 
         ffmpeg_cmd = [
             "ffmpeg", "-v", "error",
@@ -186,5 +202,5 @@ def load_video_from_gcs(
             check=True,
         )
 
-    input["video_raw"] = result.stdout
+    input[SIQDatasetColumns.VIDEO_RAW] = result.stdout
     return input
