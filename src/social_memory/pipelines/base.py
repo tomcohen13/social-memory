@@ -26,6 +26,14 @@ class PipelineConfig(BaseModel):
     max_concurrency: int = 4
     debug: bool = False
     transform_configs: Dict = {}  # optional dict of configs to be passed to respective transform functions.
+    gcs_bucket: str | None = None  # GCS bucket; defaults to GCS_BUCKET env var if not set
+    gcs_prefix: str = "siq2/video"  # path prefix within the bucket
+
+    def model_post_init(self, __context) -> None:
+        if not self.gcs_bucket:
+            from social_memory.constants import GCS_BUCKET
+            if GCS_BUCKET:
+                self.gcs_bucket = GCS_BUCKET
 
     def to_yaml(self, path: str) -> None:
         """Writes config object to yaml file"""

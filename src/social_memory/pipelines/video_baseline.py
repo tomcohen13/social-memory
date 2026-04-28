@@ -1,25 +1,37 @@
 """Test zero-shot performance of LLMs on video data"""
+from functools import partial
 from typing import List, Dict
 
 from social_memory.constants import PipelineNames
 from social_memory.pipelines.base import BasePipeline
 from social_memory.transforms import apply_transform_with_concurrency
-from social_memory.transforms.video import load_video, encode_video
+from social_memory.transforms.video import encode_video, load_video, load_video_from_gcs
+
 
 class VideoPipeline(BasePipeline):
     """
-    Video-only pipeline (i.e., audio is stripped from videos)
+    Video-only pipeline (i.e., audio is stripped from videos).
+
+    When PipelineConfig.gcs_bucket is set, videos are streamed directly from
+    GCS (gs://<gcs_bucket>/<gcs_prefix>/<vid_id>.mp4). Otherwise, videos are
+    read from the local filesystem under PATH_TO_DATA/video/.
     """
 
     NAME = PipelineNames.VIDEO
 
     def __init__(self, configs):
         super().__init__(configs)
-        
-        self.transforms = [
-            load_video,
-            encode_video,
-        ]
+
+        if configs.gcs_bucket:
+            _load = partial(
+                load_video_from_gcs,
+                bucket_name=configs.gcs_bucket,
+                prefix=configs.gcs_prefix,
+            )
+        else:
+            _load = load_video
+
+        self.transforms = [_load, encode_video]
 
     def _load_model_runner(self) -> None:
         llm = self._load_model()

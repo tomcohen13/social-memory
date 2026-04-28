@@ -138,3 +138,52 @@ def encode_video(input: dict) -> dict:
     raw: bytes | None = input.pop("video_raw", None)
     input["video"] = base64.b64encode(raw).decode("utf-8") if raw is not None else None
     return input
+
+
+def load_video_from_gcs(
+    input: dict,
+    bucket_name: str,
+    prefix: str = "siq2/video",
+    with_audio: bool = True,
+) -> dict:
+    """
+    Download a video from GCS to a temp file, process with ffmpeg, then discard the temp file.
+
+    The large blob lands on disk (not in RAM); only the ffmpeg output — which may
+    be smaller after audio stripping — is kept in input["video_raw"]. The temp
+    file is always deleted before returning.
+
+    Args:
+        input: dict with at least SIQDatasetColumns.VIDEO_ID ("vid_name").
+        bucket_name: GCS bucket name.
+        prefix: path prefix within the bucket (default: "siq2/video").
+        with_audio: if False, audio is stripped before storing.
+    """
+    from social_memory.gcs import download_to_temp, video_blob_name
+
+    video_id = input[SIQDatasetColumns.VIDEO_ID]
+
+    with download_to_temp(bucket_name, video_blob_name(video_id, prefix)) as tmp_path:
+        if tmp_path is None:
+            input["video_raw"] = None
+            return input
+
+        ffmpeg_cmd = [
+            "ffmpeg", "-v", "error",
+            "-i", str(tmp_path),
+            "-movflags", "+frag_keyframe+empty_moov",
+            "-f", "mp4",
+        ]
+        if not with_audio:
+            ffmpeg_cmd += ["-map", "0:v:0", "-an"]
+        ffmpeg_cmd += ["-c", "copy", "pipe:1"]
+
+        result = subprocess.run(
+            ffmpeg_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+
+    input["video_raw"] = result.stdout
+    return input
