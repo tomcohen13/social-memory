@@ -5,7 +5,7 @@ from typing import Dict, List
 from social_memory.pipelines.base import BasePipeline
 
 
-class SDPipeline(BasePipeline):
+class SensoryDeprivationPipeline(BasePipeline):
     """
     Pipeline for testing MCQ validity by removing any contextual information
     and only providing the question and answer options to the model.

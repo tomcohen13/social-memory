@@ -20,6 +20,12 @@ load_dotenv()
 
 parser = ArgumentParser()
 parser.add_argument(
+    "--conf",
+    type=str,
+    required=False,
+    help="Path to yaml file with pipeline configurations. Command-line args will override yaml configs.",
+)
+parser.add_argument(
     "--pipeline",
     type=str,
     choices=sorted(PIPELINE_REGISTRY),
@@ -44,10 +50,9 @@ parser.add_argument(
     help="Max concurrent requests to llm",
 )
 parser.add_argument(
-    "--conf",
+    "--experiment_name",
     type=str,
-    required=False,
-    help="Path to yaml file with pipeline configurations. Command-line args will override yaml configs.",
+    help="Name of the experiment for output file name",
 )
 
 args = parser.parse_args()

@@ -14,7 +14,7 @@ import webvtt
 
 from social_memory.constants import PATH_TO_DATA, DirPaths, SIQDatasetColumns
 
-def load_qa_dataset(split: str, with_oracle: bool = False) -> pd.DataFrame:
+def load_qa_dataset(split: str, with_oracle: bool = True) -> pd.DataFrame:
     """
     Load QA dataset from json file
     """

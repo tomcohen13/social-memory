@@ -10,8 +10,8 @@ RESULTS_DIR = "results/"
 ORIGINAL_SPLITS_FILE = "original_split.json"
 
 # GCS — set these in your .env file to enable cloud streaming
-GCS_BUCKET = os.getenv("GCS_BUCKET", "")          # e.g. "ego-social"
-GCS_PREFIX = os.getenv("GCS_PREFIX", "siq2/video") # path prefix within the bucket
+GCS_BUCKET = os.getenv("GCS_BUCKET")
+GCS_PREFIX = os.getenv("GCS_PREFIX", "siq2/video")
 
 class DirPaths(StrEnum):
     TRANSCRIPT = auto()

@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from typing import Callable, Dict, List
 from tqdm.asyncio import tqdm
 
-from social_memory.constants import GCS_PREFIX, RESULTS_DIR
+from social_memory.constants import GCS_BUCKET, GCS_PREFIX, RESULTS_DIR
 from social_memory.prompts import PROMPT_REGISTRY
 from social_memory.utils import load_qa_dataset
 
@@ -26,17 +26,11 @@ class PipelineConfig(BaseModel):
 
     model: str  # in the form of {model_provider}:{model}
     split: str
+    experiment_name: str
     max_concurrency: int = 4
-    debug: bool = False
     transform_configs: Dict = {}  # optional dict of configs to be passed to respective transform functions.
-    gcs_bucket: str | None = None  # GCS bucket; defaults to GCS_BUCKET env var if not set
-    gcs_prefix: str = GCS_PREFIX  # path prefix within the bucket
-
-    def model_post_init(self, __context) -> None:
-        if not self.gcs_bucket:
-            from social_memory.constants import GCS_BUCKET
-            if GCS_BUCKET:
-                self.gcs_bucket = GCS_BUCKET
+    gcs_bucket: str | None = GCS_BUCKET
+    gcs_prefix: str = GCS_PREFIX
 
     def to_yaml(self, path: str) -> None:
         """Writes config object to yaml file"""
@@ -154,8 +148,8 @@ class BasePipeline(ABC):
             self.NAME,
             self.configs.model,
             self.configs.split,
-            self.run_id,
-            f"results.jsonl",
+            self.configs.experiment_name,
+            f"{self.run_id}.jsonl",
         )
         if create_if_not_existent:
             os.makedirs(os.path.dirname(path), exist_ok=True)
