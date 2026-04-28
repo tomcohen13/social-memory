@@ -9,7 +9,7 @@ from social_memory.transforms.video import (
     _compute_clip_window,
     clip_around_oracle,
     encode_video,
-    load_video,
+    load_video_from_local,
     load_video_from_gcs,
 )
 
@@ -75,7 +75,7 @@ class TestClipAroundOracle:
 class TestLoadVideo:
     def test_missing_file_stores_none(self, tmp_path):
         inp = {SIQDatasetColumns.VIDEO_ID: "missing"}
-        result = load_video(inp, directory=tmp_path)
+        result = load_video_from_local(inp, directory=tmp_path)
         assert result[SIQDatasetColumns.VIDEO_RAW] is None
 
     def test_loads_bytes_and_duration(self, tmp_path):
@@ -83,7 +83,7 @@ class TestLoadVideo:
         (tmp_path / "vid1.mp4").write_bytes(raw)
 
         with patch("social_memory.transforms.video.get_duration", return_value=42.0):
-            result = load_video({SIQDatasetColumns.VIDEO_ID: "vid1"}, directory=tmp_path)
+            result = load_video_from_local({SIQDatasetColumns.VIDEO_ID: "vid1"}, directory=tmp_path)
 
         assert result[SIQDatasetColumns.VIDEO_RAW] == raw
         assert result["duration"] == 42.0
@@ -94,7 +94,7 @@ class TestLoadVideo:
         (tmp_path / "vid1.mp4").write_bytes(b"original")
 
         with patch("social_memory.transforms.video.get_duration", return_value=10.0):
-            result = load_video(
+            result = load_video_from_local(
                 {SIQDatasetColumns.VIDEO_ID: "vid1"}, directory=tmp_path, with_audio=False
             )
 

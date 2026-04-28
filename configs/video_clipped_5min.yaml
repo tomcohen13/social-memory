@@ -5,3 +5,5 @@ max_concurrency: 6
 transform_configs:
   clip_around_oracle:
     output_length: 300
+  load_video_from_gcs:
+    with_audio: false

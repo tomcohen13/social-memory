@@ -7,17 +7,19 @@ import logging
 from dotenv import load_dotenv
 load_dotenv()
 
+
 from abc import ABC, abstractmethod
 from datetime import datetime
 from langchain.chat_models import BaseChatModel, init_chat_model
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel
-from typing import Callable, Dict, List
+from typing import Dict, List
 from tqdm.asyncio import tqdm
 
 from social_memory.constants import GCS_BUCKET, GCS_PREFIX, RESULTS_DIR
 from social_memory.prompts import PROMPT_REGISTRY
+from social_memory.transforms import TransformList
 from social_memory.utils import load_qa_dataset
 
 
@@ -65,7 +67,7 @@ class BasePipeline(ABC):
         self.path_to_output = self._create_output_file_path()
         self.model_runner = None
         self.prompt_template = None
-        self.transforms: List[Callable] = []  # list of functions to apply to inputs before running model
+        self.transforms: TransformList = TransformList([])  # list of functions to apply to inputs before running model
 
         self._load_prompt_template()  # updates self.prompt_template
         self._load_model_runner()  # updates self.model_runner
@@ -76,6 +78,7 @@ class BasePipeline(ABC):
         lines = [
             f"{self.__class__.__name__}(",
             f"  Name: {self.NAME or ''}",
+            f"  Transforms: {self.transforms.draw_pipeline()}",
             f"  Model: {self.configs.model}",
             f"  Split: {self.configs.split}",
             f"  Run ID: {self.run_id}",
@@ -121,7 +124,7 @@ class BasePipeline(ABC):
 
     def _generate_run_id(self) -> str:
         """Generate run id for pipeline."""
-        return str(datetime.timestamp(datetime.now()))
+        return datetime.now().strftime("%Y%m%d-%H%M%S")
 
 
     def _create_logger(self) -> logging.Logger:
@@ -263,6 +266,7 @@ class BasePipeline(ABC):
         """Run pipeline"""
 
         self.logger.info("Starting pipeline...")
+        self.logger.info(self.__repr__())
         start_time = datetime.now()
 
         # load split of QA dataset into dataframe

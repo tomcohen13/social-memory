@@ -1,11 +1,14 @@
 """Test zero-shot performance of LLMs on video data"""
-from functools import partial
 from typing import List, Dict
 
 from social_memory.constants import PipelineNames
 from social_memory.pipelines.base import BasePipeline
-from social_memory.transforms import apply_transform_with_concurrency
-from social_memory.transforms.video import encode_video, load_video, load_video_from_gcs
+from social_memory.transforms import Transform, TransformList, apply_transform_with_concurrency
+from social_memory.transforms.video import (
+    encode_video,
+    load_video_from_local,
+    load_video_from_gcs,
+)
 
 
 class VideoPipeline(BasePipeline):
@@ -23,15 +26,18 @@ class VideoPipeline(BasePipeline):
         super().__init__(configs)
 
         if configs.gcs_bucket:
-            _load = partial(
+            self.logger.info(f"Video source: GCS — gs://{configs.gcs_bucket}/{configs.gcs_prefix}")
+            load_video = Transform(
                 load_video_from_gcs,
                 bucket_name=configs.gcs_bucket,
                 prefix=configs.gcs_prefix,
             )
         else:
-            _load = load_video
+            from social_memory.constants import PATH_TO_DATA, DirPaths
+            self.logger.info(f"Video source: local — {PATH_TO_DATA / DirPaths.VIDEO}")
+            load_video = load_video_from_local
 
-        self.transforms = [_load, encode_video]
+        self.transforms = TransformList([load_video, encode_video])
 
     def _load_model_runner(self) -> None:
         llm = self._load_model()
@@ -55,8 +61,7 @@ class VideoPipeline(BasePipeline):
 
         for transform in self.transforms:
             # apply each transform to inputs using max_concurrency workers
-            transform_name = getattr(transform, "__name__", getattr(getattr(transform, "func", None), "__name__", "unknown"))
-            self.logger.info(f"Applying transform {transform_name}...")
+            self.logger.info(f"Applying transform {transform.__name__}...")
 
             inputs = await apply_transform_with_concurrency(
                 transform,

@@ -67,17 +67,17 @@ def clip_around_oracle(input: dict, output_length: int) -> dict:
     
     Note: this transform assumes the full video bytes are already loaded in input["video_raw"].
     """
+
+    raw: bytes | None = input.get(SIQDatasetColumns.VIDEO_RAW)
+    if raw is None:
+        return input
+
     start, end = _compute_clip_window(
         video_id=input[SIQDatasetColumns.VIDEO_ID],
         oracle=input["oracle"],
         output_length=output_length,
         duration=input["duration"]
     )
-
-    raw: bytes | None = input.get(SIQDatasetColumns.VIDEO_RAW)
-    if raw is None:
-        return input
-
     result = subprocess.run(
         [
             "ffmpeg",
@@ -99,7 +99,7 @@ def clip_around_oracle(input: dict, output_length: int) -> dict:
     return input
 
 
-def load_video(
+def load_video_from_local(
     input: dict,
     directory: Path = PATH_TO_DATA / DirPaths.VIDEO,
     with_audio: bool = True,

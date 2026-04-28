@@ -11,12 +11,11 @@ if _src.is_dir():
 
 from argparse import ArgumentParser
 from dotenv import load_dotenv
+load_dotenv()
 
-from social_memory.constants import DEFAULT_MODEL, DEFAULT_MODEL_PROVIDER
 from social_memory.pipelines.base import PipelineConfig
 from social_memory.pipelines.registry import PIPELINE_REGISTRY
 
-load_dotenv()
 
 parser = ArgumentParser()
 parser.add_argument(
@@ -66,9 +65,10 @@ async def main():
         raw = yaml.safe_load(open(args.conf))
     
     # override yaml configs with command-line args if provided
-    for arg in ["model", "split", "max_concurrency", "pipeline"]:
-        if cli_value := getattr(args, arg):
-            raw[arg] = cli_value
+    for arg in args.__dict__:
+        value = getattr(args, arg)
+        if value is not None:
+            raw[arg] = value
     
     pipeline_name = raw.pop("pipeline")
     configs = PipelineConfig(**raw)
