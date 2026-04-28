@@ -1,10 +1,15 @@
 """Constants to be used across repo. This module should generally NOT import from other modules"""
 
+import os
 from enum import StrEnum, auto
 
 PATH_TO_DATA = "datasets/socialiq2/siq2/"
 PATH_TO_AUGMENTED_DATA = "datasets/validation_augmented/"
 RESULTS_DIR = "results/"
+
+# GCS — set these in your .env file to enable cloud streaming
+GCS_BUCKET = os.getenv("GCS_BUCKET", "")          # e.g. "ego-social"
+GCS_PREFIX = os.getenv("GCS_PREFIX", "siq2/video") # path prefix within the bucket
 
 class DirPaths(StrEnum):
     TRANSCRIPT = auto()
