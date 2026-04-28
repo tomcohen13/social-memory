@@ -2,10 +2,12 @@
 
 import os
 from enum import StrEnum, auto
+from pathlib import Path
 
-PATH_TO_DATA = "datasets/socialiq2/siq2/"
-PATH_TO_AUGMENTED_DATA = "datasets/validation_augmented/"
+PATH_TO_DATA = Path("datasets/socialiq2/siq2/")
+PATH_TO_AUGMENTED_DATA = Path("datasets/validation_augmented/")
 RESULTS_DIR = "results/"
+ORIGINAL_SPLITS_FILE = "original_split.json"
 
 # GCS — set these in your .env file to enable cloud streaming
 GCS_BUCKET = os.getenv("GCS_BUCKET", "")          # e.g. "ego-social"
@@ -21,6 +23,7 @@ class DirPaths(StrEnum):
 class SIQDatasetColumns(StrEnum):
     QID = "qid"
     VIDEO_ID = "vid_name"
+    VIDEO_RAW = "video_raw"
     QUESTION = "q"
     ANSWER_0 = "a0"
     ANSWER_1 = "a1"

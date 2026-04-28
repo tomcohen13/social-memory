@@ -18,21 +18,22 @@ def load_qa_dataset(split: str, with_oracle: bool = False) -> pd.DataFrame:
     """
     Load QA dataset from json file
     """
-    path = os.path.join(PATH_TO_DATA, DirPaths.QA, f"qa_{split}.json")
+    path = PATH_TO_DATA / DirPaths.QA / f"qa_{split}.json"
     print(f"trying to read file: {path}...")
     qa = pd.read_json(path, lines=True)
     if with_oracle:
         import json
-        with open(os.path.join(PATH_TO_DATA, "trims.json"), "r") as j:
+        with open(PATH_TO_DATA / "trims.json", "r") as j:
             oracles = json.load(j)
             oracles = {vid: (start, start + 60.0) for vid, start in oracles.items()}
             qa["oracle"] = qa[SIQDatasetColumns.VIDEO_ID].map(oracles)
     return qa
 
-def _read_vtt_file(vtt_path: Path) -> str:
+
+def read_vtt_file(vtt_path: Path) -> str:
     return "\n".join(caption.text for caption in webvtt.read(str(vtt_path)))
 
-
+# TODO: remove all load_Xs functions, we don't use them anymore.
 def load_transcripts(
     video_ids: Iterable[str],
     max_workers: int | None = 4,
@@ -51,7 +52,7 @@ def load_transcripts(
     Returns:
         A dictionary with video IDs as keys and transcript strings as values.
     """
-    directory = Path(PATH_TO_DATA) / str(DirPaths.TRANSCRIPT)
+    directory = PATH_TO_DATA / DirPaths.TRANSCRIPT
     
     if not video_ids:
         return {}
@@ -79,7 +80,7 @@ def load_videos(
     Returns:
         A dictionary with video IDs as keys and base64 video strings as values.
     """
-    directory = Path(PATH_TO_DATA) / str(DirPaths.VIDEO)
+    directory = PATH_TO_DATA / DirPaths.VIDEO
 
     if not video_ids:
         return {}
@@ -106,7 +107,7 @@ def load_audios(
     Returns:
         A dictionary with video IDs as keys and (file_path, mime_type) tuples as values.
     """
-    directory = Path(PATH_TO_DATA) / str(DirPaths.AUDIO)
+    directory = PATH_TO_DATA / DirPaths.AUDIO
 
     if not video_ids:
         return {}
@@ -133,7 +134,7 @@ def load_audios(
     Returns:
         A dictionary with video IDs as keys and (file_path, mime_type) tuples as values.
     """
-    directory = Path(PATH_TO_DATA) / str(DirPaths.AUDIO)
+    directory = PATH_TO_DATA / DirPaths.AUDIO
 
     if not video_ids:
         return {}
