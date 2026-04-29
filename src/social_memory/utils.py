@@ -171,7 +171,7 @@ def compute_correctness(df: pd.DataFrame) -> float:
 def get_duration(filename: str) -> float:
     """Get duration of video file in seconds using ffprobe."""
     cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", filename]
-    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     return float(result.stdout)
 
 

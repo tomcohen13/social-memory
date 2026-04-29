@@ -29,6 +29,7 @@ class PipelineConfig(BaseModel):
     model: str  # in the form of {model_provider}:{model}
     split: str
     experiment_name: str
+    batch_size: int = 16
     max_concurrency: int = 4
     transform_configs: Dict = {}  # optional dict of configs to be passed to respective transform functions.
     gcs_bucket: str | None = GCS_BUCKET
@@ -182,8 +183,14 @@ class BasePipeline(ABC):
         model_provider, model = self.configs.model.split(":")
         normalized_provider = model_provider.replace("-", "_")
 
-        if normalized_provider in ["openai", "anthropic", "google_genai"]: 
-            return init_chat_model(model=model, model_provider=normalized_provider, temperature=0.0, max_tokens=2048)
+        if normalized_provider in ["openai", "anthropic", "google_genai"]:
+            return init_chat_model(
+                model=model,
+                model_provider=normalized_provider,
+                temperature=0.0,
+                max_tokens=10,
+                timeout=30
+            )
 
         else:
             # OpenRouter
@@ -191,7 +198,9 @@ class BasePipeline(ABC):
             return ChatOpenAI(
                 base_url="https://openrouter.ai/api/v1/",
                 api_key=os.getenv("OPENROUTER_API_KEY"),
-                model_name="/".join([model_provider, model]),
+                model_name="/".join([normalized_provider, model]),
+                max_tokens=10,
+                timeout=30,
             )
 
 
@@ -269,17 +278,18 @@ class BasePipeline(ABC):
         self.logger.info(self.__repr__())
         start_time = datetime.now()
 
-        # load split of QA dataset into dataframe
         self.logger.info("loading dataset...")
-        inputs = load_qa_dataset(split=self.configs.split, with_oracle=True)
-        inputs = inputs.to_dict(orient='records')
+        dataset = load_qa_dataset(split=self.configs.split, with_oracle=True)
 
-        self.logger.info("Preparing inputs...")
-        inputs = await self.process_inputs(inputs)
+        batch_size = self.configs.batch_size
+        n_batches = len(range(0, len(dataset), batch_size))
+        self.logger.info(f"{len(dataset)} items: {n_batches} batches of {batch_size}.")
 
-        self.logger.info(f"Processing {len(inputs)} documents.")
-        results: List[dict] = await self.run_model_on_inputs(inputs)
+        for i in tqdm(range(0, len(dataset), batch_size), desc="Batches", total=n_batches):
+            batch = dataset.iloc[i:i + batch_size].to_dict(orient='records')
+            batch = await self.process_inputs(batch)
+            await self.run_model_on_inputs(batch)
 
         elapsed_time = (datetime.now() - start_time).total_seconds()
-        self.logger.info(f"Finished processing {len(inputs)} documents in {elapsed_time:.1f}s.")
+        self.logger.info(f"Finished processing {len(dataset)} documents in {elapsed_time:.1f}s.")
     

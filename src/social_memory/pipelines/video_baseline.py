@@ -63,11 +63,7 @@ class VideoPipeline(BasePipeline):
             # apply each transform to inputs using max_concurrency workers
             self.logger.info(f"Applying transform {transform.__name__}...")
 
-            inputs = await apply_transform_with_concurrency(
-                transform,
-                inputs,
-                self.configs.max_concurrency
-            )
+            inputs = await apply_transform_with_concurrency(transform, inputs, max_concurrency=2)
 
         inputs = [
             {
