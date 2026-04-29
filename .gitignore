@@ -211,8 +211,8 @@ __marimo__/
 
 # Data directory (datasets, media, etc.)
 datasets/*
-!datasets/validation_augmented/
-datasets/validation_augmented/video/
+!datasets/siq2long/
+datasets/siq2long/video/
 hw/
 results/
 logs/

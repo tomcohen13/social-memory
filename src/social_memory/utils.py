@@ -12,13 +12,19 @@ from typing import Iterable
 import pandas as pd
 import webvtt
 
-from social_memory.constants import PATH_TO_DATA, DirPaths, SIQDatasetColumns
+from social_memory.constants import (
+    DATASET_TO_DIR,
+    PATH_TO_DATA,
+    Datasets,
+    DirPaths,
+    SIQDatasetColumns,
+)
 
-def load_qa_dataset(split: str, with_oracle: bool = True) -> pd.DataFrame:
+def load_qa_dataset(dataset: str, split: str, with_oracle: bool = True) -> pd.DataFrame:
     """
     Load QA dataset from json file
     """
-    path = PATH_TO_DATA / DirPaths.QA / f"qa_{split}.json"
+    path = DATASET_TO_DIR.get(dataset) / DirPaths.QA / f"qa_{split}.json"
     print(f"trying to read file: {path}...")
     qa = pd.read_json(path, lines=True)
     if with_oracle:

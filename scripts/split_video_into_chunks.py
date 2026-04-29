@@ -3,18 +3,16 @@
 import json 
 import pandas as pd
 from moviepy.editor import VideoFileClip
-from pathlib import Path
+from social_memory.constants import PATH_TO_AUGMENTED_DATA, DirPaths
 
 BUFFER_TIME = 10 # seconds
-TEST_SET_DIR = Path("datasets/validation_augmented")
-
-qa = pd.read_json(TEST_SET_DIR / "qa_augmented.json", lines=True)
-with open(TEST_SET_DIR.parent / "trims.json", "r") as j:
+qa = pd.read_json(PATH_TO_AUGMENTED_DATA / DirPaths.QA / "qa_augmented.json", lines=True)
+with open(PATH_TO_AUGMENTED_DATA / "trims.json", "r") as j:
     trims = json.load(j)
 
 qa["trim_start"] = qa["vid_name"].map(trims)
 qa["trim_end"] = qa["trim_start"] + 60
-qa["video_duration"] = qa["vid_name"].apply(lambda vid: VideoFileClip(f"{TEST_SET_DIR}/video/{vid}.mp4").duration)
+qa["video_duration"] = qa["vid_name"].apply(lambda vid: VideoFileClip(f"{PATH_TO_AUGMENTED_DATA}/video/{vid}.mp4").duration)
 qa[["vid_name", "trim_start", "trim_end", "video_duration"]].sample(5)
 
 all_chunks = {}
@@ -57,6 +55,6 @@ for i, row in qa.drop_duplicates(subset=["vid_name"]).iterrows():
     all_chunks[row["vid_name"]]["chunks"] = chunks
     all_chunks[row["vid_name"]]["gt_idx"] = gt_idx
 
-with open(f"{TEST_SET_DIR}/video_chunks.json", "w") as j:
+with open(PATH_TO_AUGMENTED_DATA / "video_chunks.json", "w") as j:
     json.dump(all_chunks, j, indent=2)
 
