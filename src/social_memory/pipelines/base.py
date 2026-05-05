@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from typing import Dict, List
 from tqdm.asyncio import tqdm
 
-from social_memory.constants import GCS_BUCKET, GCS_PREFIX, RESULTS_DIR
+from social_memory.constants import GCS_BUCKET, GCS_PREFIX, RESULTS_DIR, Datasets
 from social_memory.prompts import PROMPT_REGISTRY
 from social_memory.transforms import TransformList
 from social_memory.utils import load_qa_dataset
@@ -28,8 +28,9 @@ class PipelineConfig(BaseModel):
 
     model: str  # in the form of {model_provider}:{model}
     split: str
+    dataset: str = Datasets.SIQ2LONG.value
     experiment_name: str
-    batch_size: int = 16
+    batch_size: int = 2
     max_concurrency: int = 4
     transform_configs: Dict = {}  # optional dict of configs to be passed to respective transform functions.
     gcs_bucket: str | None = GCS_BUCKET
@@ -279,7 +280,7 @@ class BasePipeline(ABC):
         start_time = datetime.now()
 
         self.logger.info("loading dataset...")
-        dataset = load_qa_dataset(split=self.configs.split, with_oracle=True)
+        dataset = load_qa_dataset(dataset=self.configs.dataset, split=self.configs.split, with_oracle=True)
 
         batch_size = self.configs.batch_size
         n_batches = len(range(0, len(dataset), batch_size))
