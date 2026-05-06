@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from pathlib import Path
@@ -15,7 +14,6 @@ import webvtt
 from social_memory.constants import (
     DATASET_TO_DIR,
     PATH_TO_DATA,
-    Datasets,
     DirPaths,
     SIQDatasetColumns,
 )
@@ -176,8 +174,23 @@ def compute_correctness(df: pd.DataFrame) -> float:
 
 def get_duration(filename: str) -> float:
     """Get duration of video file in seconds using ffprobe."""
-    cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", filename]
-    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    return float(result.stdout)
+    cmd = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        filename,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        err = (result.stderr or "").strip() or "ffprobe failed with no stderr"
+        raise RuntimeError(f"ffprobe exited {result.returncode}: {err}")
+    raw = (result.stdout or "").strip()
+    if not raw:
+        raise RuntimeError("ffprobe returned empty duration")
+    return float(raw)
 
 

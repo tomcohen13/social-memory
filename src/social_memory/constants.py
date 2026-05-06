@@ -3,6 +3,10 @@
 import os
 from enum import StrEnum, auto
 from pathlib import Path
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 PATH_TO_DATA = Path("datasets/socialiq2/siq2/")
 PATH_TO_AUGMENTED_DATA = Path("datasets/siq2long/")
