@@ -16,6 +16,7 @@ ORIGINAL_SPLITS_FILE = "original_split.json"
 # GCS — set these in your .env file to enable cloud streaming
 GCS_BUCKET = os.getenv("GCS_BUCKET")
 GCS_PREFIX = os.getenv("GCS_PREFIX", "siq2/video")
+GCS_CHUNKS_PREFIX = os.getenv("GCS_CHUNKS_PREFIX", "siq2/chunks")
 
 
 class Datasets(StrEnum):
