@@ -1,59 +1,57 @@
 """Script to divide full videos into chunks while storing the ground truth trim index for each video."""
 
-import json 
-import pandas as pd
-from moviepy.editor import VideoFileClip
-from social_memory.constants import PATH_TO_AUGMENTED_DATA, DirPaths
+import json
+import sys
+from pathlib import Path
+
+from tqdm import tqdm
+
+# src/ layout: plain `python scripts/...` does not put `src` on sys.path unless the package is on
+# that interpreter's site-packages. Keeps the script runnable even when the active `python` is not
+# the one you installed with `uv pip install -e .`.
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_src = _REPO_ROOT / "src"
+if _src.is_dir():
+    sys.path.insert(0, str(_src))
+
+from social_memory.constants import GCS_BUCKET, GCS_PREFIX, PATH_TO_AUGMENTED_DATA
+from social_memory.data_augmentation.chunking import compute_chunks_around_oracle
+from social_memory.gcs import download_to_temp, list_blobs
+from social_memory.utils import get_duration
 
 BUFFER_TIME = 10 # seconds
-qa = pd.read_json(PATH_TO_AUGMENTED_DATA / DirPaths.QA / "qa_augmented.json", lines=True)
-with open(PATH_TO_AUGMENTED_DATA / "trims.json", "r") as j:
-    trims = json.load(j)
+CHUNK_SIZE = 60
 
-qa["trim_start"] = qa["vid_name"].map(trims)
-qa["trim_end"] = qa["trim_start"] + 60
-qa["video_duration"] = qa["vid_name"].apply(lambda vid: VideoFileClip(f"{PATH_TO_AUGMENTED_DATA}/video/{vid}.mp4").duration)
-qa[["vid_name", "trim_start", "trim_end", "video_duration"]].sample(5)
+with open(PATH_TO_AUGMENTED_DATA / "oracles.json", "r") as j:
+    oracles = json.load(j)
 
 all_chunks = {}
 
-for i, row in qa.drop_duplicates(subset=["vid_name"]).iterrows():
+for blob in tqdm(list(list_blobs(bucket=GCS_BUCKET, prefix=GCS_PREFIX))):
 
-    all_chunks[row["vid_name"]] = {}
-    chunks = []
-    full_duration = float(row["video_duration"])
-    gt_start, gt_end = gt = row[["trim_start", "trim_end"]].tolist()
-    print(f"Processing video: {row['vid_name']} | gt: {gt} | full_duration: {full_duration}")
-    chunk_start, chunk_end = gt_start - 60, gt_start
-    while chunk_start >= 0:
-        chunks.append([chunk_start, chunk_end])
-        chunk_end = chunk_start
-        chunk_start -= 60
-    # two options: 
-    #   1. within buffer space, extend to 0 and add
-    if (0 <= chunk_end <= BUFFER_TIME):
-        if chunks:
-            chunks[-1][0] = 0
-    else:
-        chunks.append([0, chunk_end])
-    
-    chunks = chunks[::-1]
-    chunks.append(gt)
-    gt_idx = len(chunks) - 1
+    video_id = Path(blob.name).stem
+    print(f"Processing video: {video_id}")
 
-    chunk_start, chunk_end = gt_end, gt_end + 60
-    while chunk_end <= full_duration:
-        chunks.append([chunk_start, chunk_end])
-        chunk_start = chunk_end
-        chunk_end += 60
-    
-    if chunk_end <= full_duration:
-        # extend last chunk
-        chunks[-1][1] = full_duration
-    else:
-        chunks.append([chunk_start, full_duration])
-    all_chunks[row["vid_name"]]["chunks"] = chunks
-    all_chunks[row["vid_name"]]["gt_idx"] = gt_idx
+    with download_to_temp(GCS_BUCKET, blob.name) as path:
+        if path is None:
+            raise FileNotFoundError("missing blob")
+        full_duration = get_duration(str(path))
+
+    oracle = oracles.get(video_id)
+    if not oracle:
+        print(f"Could not find oracle for video id {video_id}")
+        continue
+
+    try:
+        chunks, oracle_idx = compute_chunks_around_oracle(oracle, full_duration)
+    except:
+        print(f"Could not compute chunks for video id {video_id}")
+        continue
+
+    all_chunks[video_id] = {
+        "chunks": chunks,
+        "oracle_idx": oracle_idx,
+    }
 
 with open(PATH_TO_AUGMENTED_DATA / "video_chunks.json", "w") as j:
     json.dump(all_chunks, j, indent=2)

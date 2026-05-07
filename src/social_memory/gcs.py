@@ -5,7 +5,7 @@ import os
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator, Optional
+from typing import Any, Generator, Iterator, Optional
 
 
 def _client():
@@ -28,6 +28,12 @@ def video_blob_name(video_id: str, prefix: str) -> str:
 
 def blob_exists(bucket_name: str, name: str) -> bool:
     return _client().bucket(bucket_name).blob(name).exists()
+
+
+def list_blobs(bucket, prefix) -> Iterator[Any]:
+    from google.cloud import storage
+    client = storage.Client()
+    return client.bucket(bucket).list_blobs(prefix=prefix)
 
 
 @contextmanager
