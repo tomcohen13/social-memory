@@ -6,71 +6,65 @@ import av
 import numpy as np
 import torch
 import torch.nn.functional as F
-from PIL import Image
 from transformers import XCLIPModel, XCLIPProcessor
 
 from social_memory.utils import read_vtt_file
 
 CHECKPOINT = "microsoft/xclip-base-patch16-16-frames"
-processor = XCLIPProcessor.from_pretrained(CHECKPOINT, use_fast=False)
-model = XCLIPModel.from_pretrained(CHECKPOINT)
-
-# freeze the architecture (go over the params of each of the parameters)
-for p in model.parameters():
-    p.requires_grad = False
-model.eval()
-
-NUM_FRAMES = model.config.vision_config.num_frames  # 16 for base-patch16-16-frames
 DATA_ROOT = Path("datasets/socialiq2/siq2")
 
 
-# run a forward pass of the video-trancript chunk
-def sample_frames(video_path: Path, num_frames: int) -> list[Image.Image]:
-    """Decode `num_frames` evenly-spaced RGB frames from an mp4 as PIL Images."""
+class XCLIPEncoder(torch.nn.Module):
+    def __init__(self, checkpoint: str = CHECKPOINT):
+        super().__init__()
+        self.processor = XCLIPProcessor.from_pretrained(checkpoint, use_fast=False)
+        self.model = XCLIPModel.from_pretrained(checkpoint)
+        for p in self.model.parameters():
+            p.requires_grad = False
+        self.model.eval()
+        self.num_frames = self.model.config.vision_config.num_frames
+
+    def forward(
+        self, frames: list[np.ndarray], transcript: str
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        text_inputs = self.processor.tokenizer(
+            [transcript], return_tensors="pt", padding=True, truncation=True,
+        )
+        video_inputs = self.processor.image_processor([frames], return_tensors="pt")
+        text_out = self.model.get_text_features(
+            input_ids=text_inputs["input_ids"],
+            attention_mask=text_inputs["attention_mask"],
+        )
+        video_out = self.model.get_video_features(pixel_values=video_inputs["pixel_values"])
+        text_emb = F.normalize(text_out.pooler_output, dim=-1)
+        video_emb = F.normalize(video_out.pooler_output, dim=-1)
+        return text_emb, video_emb
+
+
+def sample_frames(video_path: Path, num_frames: int) -> list[np.ndarray]:
+    """Decode `num_frames` evenly-spaced RGB frames from an mp4 as HWC uint8 arrays."""
     container = av.open(str(video_path))
     total = container.streams.video[0].frames
-    container.close()
-
     indices = set(np.linspace(0, total - 1, num_frames).astype(int).tolist())
-    container = av.open(str(video_path))
-    frames: list[Image.Image] = []
+    frames: list[np.ndarray] = []
     for i, frame in enumerate(container.decode(video=0)):
         if i in indices:
-            frames.append(Image.fromarray(frame.to_ndarray(format="rgb24")))
+            frames.append(frame.to_ndarray(format="rgb24"))
         if len(frames) == num_frames:
             break
     container.close()
     return frames
 
 
+encoder = XCLIPEncoder()
+
 # go into the datasets socialiq2 - siq2 videos as demo videos
 video_id = "0GQ8pgQJShg"
-frames = sample_frames(DATA_ROOT / "video" / f"{video_id}.mp4", NUM_FRAMES)
+frames = sample_frames(DATA_ROOT / "video" / f"{video_id}.mp4", encoder.num_frames)
 transcript = read_vtt_file(DATA_ROOT / "transcript" / f"{video_id}.vtt")
 
-# Split text and video calls: in transformers 5.2.0 the combined
-# XCLIPProcessor(text=..., videos=...) path drops the video kwarg.
-text_inputs = processor.tokenizer(
-    [transcript], return_tensors="pt", padding=True, truncation=True,
-)
-video_inputs = processor.image_processor([frames], return_tensors="pt")
-
-# encode individually, fuse representations
 with torch.no_grad():
-    text_out = model.get_text_features(
-        input_ids=text_inputs["input_ids"],
-        attention_mask=text_inputs["attention_mask"],
-    )
-    video_out = model.get_video_features(pixel_values=video_inputs["pixel_values"])
-
-# In transformers 5.2.0 both calls return BaseModelOutputWithPooling whose
-# pooler_output is the final 512-d projected embedding (text_projection /
-# visual_projection + MIT have already been applied).
-text_emb = text_out.pooler_output
-video_emb = video_out.pooler_output
-
-text_emb = F.normalize(text_emb, dim=-1)
-video_emb = F.normalize(video_emb, dim=-1)
+    text_emb, video_emb = encoder(frames, transcript)
 
 fused_concat = torch.cat([text_emb, video_emb], dim=-1)   # (1, 1024)
 fused_mean = (text_emb + video_emb) / 2                   # (1, 512)
