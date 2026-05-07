@@ -11,15 +11,16 @@ from transformers import XCLIPModel, XCLIPProcessor
 
 from social_memory.utils import read_vtt_file
 
-processor = XCLIPProcessor.from_pretrained("microsoft/xclip-base-patch32", use_fast=False)
-model = XCLIPModel.from_pretrained("microsoft/xclip-base-patch32")
+CHECKPOINT = "microsoft/xclip-base-patch16-16-frames"
+processor = XCLIPProcessor.from_pretrained(CHECKPOINT, use_fast=False)
+model = XCLIPModel.from_pretrained(CHECKPOINT)
 
 # freeze the architecture (go over the params of each of the parameters)
 for p in model.parameters():
     p.requires_grad = False
 model.eval()
 
-NUM_FRAMES = model.config.vision_config.num_frames  # 8 for base-patch32
+NUM_FRAMES = model.config.vision_config.num_frames  # 16 for base-patch16-16-frames
 DATA_ROOT = Path("datasets/socialiq2/siq2")
 
 
