@@ -30,6 +30,10 @@ def blob_exists(bucket_name: str, name: str) -> bool:
     return _client().bucket(bucket_name).blob(name).exists()
 
 
+def get_blob_from_path(bucket_name, path):
+    return _client().bucket(bucket_name).get_blob(path)
+
+
 def list_blobs(bucket, prefix) -> Iterator[Any]:
     from google.cloud import storage
     client = storage.Client()
