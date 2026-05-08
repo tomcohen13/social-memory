@@ -193,4 +193,12 @@ def get_duration(filename: str) -> float:
         raise RuntimeError("ffprobe returned empty duration")
     return float(raw)
 
-
+def check_device() -> str:
+    import torch
+    """Checks if MPS is available and returns the device string"""
+    if torch.backends.mps.is_available() and torch.backends.mps.is_built():
+        return "mps"
+    elif torch.cuda.is_available():
+        return "cuda"
+    else:
+        return "cpu"
