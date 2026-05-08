@@ -1,4 +1,5 @@
 
+import os
 import torch
 
 from pathlib import Path
@@ -7,13 +8,13 @@ from tqdm import tqdm
 
 from social_memory.constants import SIQDatasetColumns
 # from social_memory.pipelines.base import BasePipeline
-from social_memory.utils import check_device
+from social_memory.utils import check_device, read_vtt_file
 from social_memory.constants import GCS_BUCKET, GCS_CHUNKS_PREFIX
 from social_memory.gcs import list_blobs, get_blob_from_path, download_to_temp
 from social_memory.encoder import XCLIPEncoder, sample_frames
     
 # CONVERT THIS UGLY-ASS THING INTO PIPELINE
-def evaluate_encoder(inputs: List[dict]) -> List[dict]:
+def evaluate_encoder(inputs: List[dict], encoder, output_path: str) -> List[dict]:
     """
     Evaluate zero-shot oracle-finding performance of the X-CLIP dual encoder.
 
@@ -42,6 +43,12 @@ def evaluate_encoder(inputs: List[dict]) -> List[dict]:
         2. Convert into a BasePipeline
         3. Recycling chunks across questions from same video_id.
     """
+    import pandas as pd
+
+    if os.path.exists(output_path):
+        results_df = pd.read_csv(output_path).drop_duplicates()
+    else:
+        results_df = pd.DataFrame()
 
     video_ids = set([inp[SIQDatasetColumns.VIDEO_ID] for inp in inputs])
     video_to_chunks = {vid_id: {"transcripts": [], "chunks": []} for vid_id in video_ids}
@@ -63,47 +70,63 @@ def evaluate_encoder(inputs: List[dict]) -> List[dict]:
 
     device = check_device()
     print(f"loading encoder to device {device}...")
-    encoder = XCLIPEncoder().to(device)
+    encoder.to(device)
 
     for inp in inputs:
-        vid_id = inp[SIQDatasetColumns.VIDEO_ID]
-        question = inp.get(SIQDatasetColumns.QUESTION, "")
-        chunks = sorted(video_to_chunks[vid_id]["chunks"])
-        transcripts = sorted(video_to_chunks[vid_id]["transcripts"])
+        try: 
+            vid_id = inp[SIQDatasetColumns.VIDEO_ID]
+            question = inp.get(SIQDatasetColumns.QUESTION, "")
+            chunks = sorted(video_to_chunks[vid_id]["chunks"])
+            transcripts = sorted(video_to_chunks[vid_id]["transcripts"])
 
-        if not chunks:
-            print(f"[ERROR] no chunks for {vid_id!r}, skipping")
+            if not chunks:
+                print(f"[ERROR] no chunks for {vid_id!r}, skipping")
+                continue
+
+            print(f"\n{vid_id} | {question!r}")
+            inp["embeddings"] = {}
+            for path_to_chunk, path_to_transcript in tqdm(zip(chunks, transcripts), total=min(len(chunks), len(transcripts)), desc=vid_id):
+                chunk_idx = Path(path_to_chunk).stem
+
+                with download_to_temp(GCS_BUCKET, path_to_transcript) as tmp_transcript_path:
+                    transcript = read_vtt_file(tmp_transcript_path)
+                if not transcript.strip():
+                    print(f"  [WARNING] empty transcript for chunk {chunk_idx}")
+                    continue
+
+                print(f"Sample {encoder.num_frames} frames.")
+                with download_to_temp(GCS_BUCKET, path_to_chunk) as tmp_chunk_path:
+                    frames = sample_frames(tmp_chunk_path, num_frames=encoder.num_frames)
+
+                if not frames:
+                    print(f"  [WARNING] no frames sampled for chunk {chunk_idx}")
+                    continue
+
+                with torch.no_grad():
+                    embeddings = encoder(frames, transcript)
+                inp["embeddings"][chunk_idx] = embeddings["fused_embeddings"].detach().cpu()
+
+            query_embed = encoder.encode_text(question).detach().cpu()
+            stacked = torch.vstack(list(inp["embeddings"].values()))
+            inp["similarities"] = stacked @ query_embed.T
+            inp["most_similar"] = torch.argmax(inp["similarities"]).item()
+
+            print(f"  most similar: {inp['most_similar']} ", end="")
+            if "oracle_idx" in inp:
+                print(f" | oracle: {inp['oracle_idx']}", end="")
+            
+            new_row = {k: v for k, v in inp.items() if k != "embeddings"}
+            if len(results_df) == 0:
+                # fill in columns as well
+                results_df = pd.concat([results_df, pd.DataFrame([new_row])])
+            else:
+                results_df.loc[len(results_df)] = new_row
+            results_df.to_csv(output_path)
+
+        except Exception as e:
+            print(f"there was a problem with input: {inp["qid"]}, error: {e}")
             continue
-
-        print(f"\n{vid_id} | {question!r}")
-        inp["embeddings"] = {}
-        for path_to_chunk, path_to_transcript in tqdm(zip(chunks, transcripts), total=min(len(chunks), len(transcripts)), desc=vid_id):
-            chunk_idx = Path(path_to_chunk).stem
-
-            transcript = get_blob_from_path(GCS_BUCKET, path_to_transcript).download_as_text()
-            if not transcript.strip():
-                print(f"  [WARNING] empty transcript for chunk {chunk_idx}")
-
-            with download_to_temp(GCS_BUCKET, path_to_chunk) as tmp_chunk_path:
-                frames = sample_frames(tmp_chunk_path, num_frames=encoder.num_frames)
-
-            if not frames:
-                print(f"  [WARNING] no frames sampled for chunk {chunk_idx}")
-
-            with torch.no_grad():
-                embeddings = encoder(frames, transcript)
-            inp["embeddings"][chunk_idx] = embeddings["fused_embeddings"].detach().cpu()
-
-        query_embed = encoder.encode_text(question).detach().cpu()
-        stacked = torch.vstack(list(inp["embeddings"].values()))
-        inp["similarities"] = stacked @ query_embed.T
-        inp["most_similar"] = torch.argmax(inp["similarities"])
-
-        most_similar_key = list(inp["embeddings"].keys())[inp["most_similar"].item()]
-        print(f"  similarities: {inp['similarities'].squeeze().tolist()}")
-        print(f"  most similar: {most_similar_key}", end="")
-        if "oracle_idx" in inp:
-            print(f" | oracle: {inp['oracle_idx']}", end="")
         print()
+
 
     return inputs
