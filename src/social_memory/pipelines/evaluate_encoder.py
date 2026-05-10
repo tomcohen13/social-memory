@@ -1,20 +1,24 @@
 
 import os
 import torch
+import torch.nn as nn
 
 from pathlib import Path
 from typing import List
 from tqdm import tqdm
 
 from social_memory.constants import SIQDatasetColumns
-# from social_memory.pipelines.base import BasePipeline
-from social_memory.utils import check_device, read_vtt_file
+from social_memory.utils import LRUCache, check_device, read_vtt_file
 from social_memory.constants import GCS_BUCKET, GCS_CHUNKS_PREFIX
-from social_memory.gcs import list_blobs, get_blob_from_path, download_to_temp
-from social_memory.encoder import XCLIPEncoder, sample_frames
+from social_memory.gcs import list_blobs, download_to_temp
+from social_memory.encoder import sample_frames
     
 # CONVERT THIS UGLY-ASS THING INTO PIPELINE
-def evaluate_encoder(inputs: List[dict], encoder, output_path: str) -> List[dict]:
+def evaluate_encoder(
+    inputs: List[dict],
+    encoder: nn.Module,
+    output_path: str
+) -> List[dict]:
     """
     Evaluate zero-shot oracle-finding performance of the X-CLIP dual encoder.
 
@@ -66,54 +70,66 @@ def evaluate_encoder(inputs: List[dict], encoder, output_path: str) -> List[dict
         n_trans = len(video_to_chunks[vid_id]["transcripts"])
         print(f"  {vid_id}: {n_chunks} chunks, {n_trans} transcripts")
         if n_chunks != n_trans:
-            print(f"  [WARNING] count mismatch for {vid_id} — zip will truncate to {min(n_chunks, n_trans)}")
+            print(f"  [WARNING] count mismatch for {vid_id}!")
 
     device = check_device()
     print(f"loading encoder to device {device}...")
     encoder.to(device)
 
+    embeddings_cache = LRUCache(max_size=25)
+
     for inp in inputs:
         try: 
             vid_id = inp[SIQDatasetColumns.VIDEO_ID]
-            question = inp.get(SIQDatasetColumns.QUESTION, "")
-            chunks = sorted(video_to_chunks[vid_id]["chunks"])
-            transcripts = sorted(video_to_chunks[vid_id]["transcripts"])
-
-            if not chunks:
-                print(f"[ERROR] no chunks for {vid_id!r}, skipping")
+            question = inp.get(SIQDatasetColumns.QUESTION)
+            if not question:
+                print(f"[ERROR] no question for {vid_id!r}, skipping")
                 continue
 
+            if not video_to_chunks[vid_id]["chunks"]:
+                print(f"[ERROR] no chunks for {vid_id!r}, skipping")
+                continue
+            
             print(f"\n{vid_id} | {question!r}")
-            inp["embeddings"] = {}
-            for path_to_chunk, path_to_transcript in tqdm(zip(chunks, transcripts), total=min(len(chunks), len(transcripts)), desc=vid_id):
-                chunk_idx = Path(path_to_chunk).stem
+            if vid_id in embeddings_cache:
+                # load from cache
+                inp["embeddings"] = embeddings_cache[vid_id]
+            
+            else:
+                inp["embeddings"] = {}
+                for path_to_chunk in tqdm(video_to_chunks[vid_id]["chunks"]):
+                    chunk_idx = Path(path_to_chunk).stem
+                    path_to_transcript = [t for t in video_to_chunks[vid_id]["transcripts"] if chunk_idx in t][0]
 
-                with download_to_temp(GCS_BUCKET, path_to_transcript) as tmp_transcript_path:
-                    transcript = read_vtt_file(tmp_transcript_path)
-                if not transcript.strip():
-                    print(f"  [WARNING] empty transcript for chunk {chunk_idx}")
-                    continue
+                    with download_to_temp(GCS_BUCKET, path_to_transcript) as tmp_transcript_path:
+                        transcript = read_vtt_file(tmp_transcript_path)
+                    if not transcript.strip():
+                        print(f"  [WARNING] empty transcript for chunk {chunk_idx}")
+                        break
 
-                print(f"Sample {encoder.num_frames} frames.")
-                with download_to_temp(GCS_BUCKET, path_to_chunk) as tmp_chunk_path:
-                    frames = sample_frames(tmp_chunk_path, num_frames=encoder.num_frames)
+                    print(f"Sample {encoder.num_frames} frames.")
+                    with download_to_temp(GCS_BUCKET, path_to_chunk) as tmp_chunk_path:
+                        frames = sample_frames(tmp_chunk_path, num_frames=encoder.num_frames)
 
-                if not frames:
-                    print(f"  [WARNING] no frames sampled for chunk {chunk_idx}")
-                    continue
+                    if not frames:
+                        print(f"  [WARNING] no frames sampled for chunk {chunk_idx}")
+                        break
 
-                with torch.no_grad():
-                    embeddings = encoder(frames, transcript)
-                inp["embeddings"][chunk_idx] = embeddings["fused_embeddings"].detach().cpu()
+                    with torch.no_grad():
+                        embeddings = encoder(frames, transcript)
+                    inp["embeddings"][chunk_idx] = embeddings["fused_embeddings"].detach().cpu()
+            
+            if len(inp["embeddings"]) != len(inp["chunk_ids"]):
+                continue
+            else:
+                embeddings_cache[vid_id] = inp["embeddings"]
 
             query_embed = encoder.encode_text(question).detach().cpu()
             stacked = torch.vstack(list(inp["embeddings"].values()))
             inp["similarities"] = stacked @ query_embed.T
             inp["most_similar"] = torch.argmax(inp["similarities"]).item()
 
-            print(f"  most similar: {inp['most_similar']} ", end="")
-            if "oracle_idx" in inp:
-                print(f" | oracle: {inp['oracle_idx']}", end="")
+            print(f"  most similar: {inp['most_similar']} | oracle: {inp['oracle_idx']}")
             
             new_row = {k: v for k, v in inp.items() if k != "embeddings"}
             if len(results_df) == 0:

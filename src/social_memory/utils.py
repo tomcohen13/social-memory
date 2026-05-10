@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from collections import UserDict
 from functools import partial
 from pathlib import Path
 import subprocess
@@ -202,3 +203,28 @@ def check_device() -> str:
         return "cuda"
     else:
         return "cpu"
+
+
+class LRUCache(UserDict):
+    def __init__(self, max_size=10):
+        super().__init__()
+        self.max_size = max_size
+
+    def __setitem__(self, key, value):
+        # If the key is new and cache is full, remove the first inserted item
+        if key not in self.data and len(self.data) >= self.max_size:
+            first_key = next(iter(self.data))
+            del self.data[first_key]
+        
+        # Move key to the end by deleting and re-inserting if it already exists
+        if key in self.data:
+            del self.data[key]
+            
+        self.data[key] = value
+
+    def __getitem__(self, key):
+        # Move accessed item to the end (making it most recently used)
+        value = self.data[key]
+        del self.data[key]
+        self.data[key] = value
+        return value
