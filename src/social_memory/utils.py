@@ -2,22 +2,28 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
-from collections import UserDict
-from functools import partial
-from pathlib import Path
-import subprocess
-from typing import Iterable
-
 import pandas as pd
+import subprocess
 import webvtt
+
+from collections import UserDict
+from pathlib import Path
+from typing import List
+
 
 from social_memory.constants import (
     DATASET_TO_DIR,
-    PATH_TO_DATA,
     DirPaths,
     SIQDatasetColumns,
 )
+
+def load_dataset(dataset_name: str, split: str) -> pd.DataFrame:
+
+    split_qids = load_qa_dataset(dataset_name, split, with_oracle=False)["qid"].unique()
+    df = pd.read_csv(DATASET_TO_DIR.get(dataset_name) / "dataset.csv").drop_duplicates("qid")
+    df["num_chunks"] = df["chunk_ids"].apply(lambda x: len(eval(x)))
+    df["oracle_idx"] = df["oracle_idx"].apply(int)
+    return df[df["qid"].isin(split_qids)].reset_index(drop=True)
 
 def load_qa_dataset(dataset: str, split: str, with_oracle: bool = True) -> pd.DataFrame:
     """
@@ -26,127 +32,39 @@ def load_qa_dataset(dataset: str, split: str, with_oracle: bool = True) -> pd.Da
     path = DATASET_TO_DIR.get(dataset) / DirPaths.QA / f"qa_{split}.json"
     print(f"trying to read file: {path}...")
     qa = pd.read_json(path, lines=True)
-    if with_oracle:
-        import json
-        with open(PATH_TO_DATA / "trims.json", "r") as j:
-            oracles = json.load(j)
-            oracles = {vid: (start, start + 60.0) for vid, start in oracles.items()}
-            qa["oracle"] = qa[SIQDatasetColumns.VIDEO_ID].map(oracles)
+    # if with_oracle:
+    #     import json
+    #     with open(PATH_TO_DATA / "trims.json", "r") as j:
+    #         oracles = json.load(j)
+    #         oracles = {vid: (start, start + 60.0) for vid, start in oracles.items()}
+    #         qa["oracle"] = qa[SIQDatasetColumns.VIDEO_ID].map(oracles)
     return qa
 
 
 def read_vtt_file(vtt_path: Path) -> str:
     return "\n".join(caption.text for caption in webvtt.read(str(vtt_path)))
 
-# TODO: remove all load_Xs functions, we don't use them anymore.
-def load_transcripts(
-    video_ids: Iterable[str],
-    max_workers: int | None = 4,
-) -> dict[str, str]:
+
+def group_inputs_by_video_id(inputs: List[dict]) -> List[dict]:
     """
-    Loads .vtt transcript files for a list of video IDs.
+    Group inputs by video id.
 
-    For each video ID, attempts to read the corresponding .vtt file from the Social-IQ transcript directory.
-    Returns a dictionary mapping each video ID to its transcript text. If a transcript is missing,
-    the value will be an empty string.
 
-    Args:
-        video_ids: An iterable of video IDs to look for .vtt files.
-        max_workers: Maximum number of threads to use for reading files.
-
-    Returns:
-        A dictionary with video IDs as keys and transcript strings as values.
+    Example:
+    >> inputs = [{'vid_name': 1, 'q': 'why?'}, {'vid_name': 1, 'q': 'what?'}, {'vid_name': 2, 'q': 'how?'}]
+    >> group_inputs_by_video_id(inputs)
+    [
+        {'vid_name': 1, 'questions': ['why?', 'what?']},
+        {'vid_name': 2, 'q': 'how?'}
+    ]
     """
-    directory = PATH_TO_DATA / DirPaths.TRANSCRIPT
-    
-    if not video_ids:
-        return {}
-
-    worker = partial(_load_single_transcript, directory=directory)
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        return dict(pool.map(worker, video_ids))
-
-
-def load_videos(
-    video_ids: Iterable[str],
-    max_workers: int | None = 4,
-    with_audio: bool = True,
-) -> dict[str, str]:
-    """
-    Loads .mp4 video files for a list of video IDs as base64-encoded strings.
-
-    Returns a dictionary mapping each video ID to its base64-encoded video content.
-    If a video file is missing, the value will be an empty string.
-
-    Args:
-        video_ids: An iterable of video IDs to load.
-        max_workers: Maximum number of threads to use for reading files.
-
-    Returns:
-        A dictionary with video IDs as keys and base64 video strings as values.
-    """
-    directory = PATH_TO_DATA / DirPaths.VIDEO
-
-    if not video_ids:
-        return {}
-
-    worker = partial(_load_single_video, directory=directory, with_audio=with_audio)
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        return dict(pool.map(worker, video_ids))
-
-
-def load_audios(
-    video_ids: Iterable[str],
-    max_workers: int | None = 4,
-) -> dict[str, tuple[str, str]]:
-    """
-    Finds audio files for a list of video IDs.
-
-    Checks for mp3 then wav under the audio directory. Returns a dict mapping
-    each video ID to a (file_path, mime_type) tuple. Missing files map to ("", "").
-
-    Args:
-        video_ids: An iterable of video IDs to load.
-        max_workers: Maximum number of threads to use for reading files.
-
-    Returns:
-        A dictionary with video IDs as keys and (file_path, mime_type) tuples as values.
-    """
-    directory = PATH_TO_DATA / DirPaths.AUDIO
-
-    if not video_ids:
-        return {}
-
-    worker = partial(_load_single_audio, directory=directory)
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        return dict(pool.map(worker, video_ids))
-
-
-def load_audios(
-    video_ids: Iterable[str],
-    max_workers: int | None = 4,
-) -> dict[str, tuple[str, str]]:
-    """
-    Finds audio files for a list of video IDs.
-
-    Checks for mp3 then wav under the audio directory. Returns a dict mapping
-    each video ID to a (file_path, mime_type) tuple. Missing files map to ("", "").
-
-    Args:
-        video_ids: An iterable of video IDs to load.
-        max_workers: Maximum number of threads to use for reading files.
-
-    Returns:
-        A dictionary with video IDs as keys and (file_path, mime_type) tuples as values.
-    """
-    directory = PATH_TO_DATA / DirPaths.AUDIO
-
-    if not video_ids:
-        return {}
-
-    worker = partial(_load_single_audio, directory=directory)
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        return dict(pool.map(worker, video_ids))
+    inputs_df = pd.DataFrame.from_records(inputs)
+    grouped_df = inputs_df.groupby(SIQDatasetColumns.VIDEO_ID).agg(
+        {"vid_name": "first", "q": list, "qid": list, "oracle_idx": "first", "num_chunks": "first"}
+    )
+    grouped_df = grouped_df.rename(columns={"q": "questions"})
+    grouped_inputs = grouped_df.to_dict(orient="records")
+    return grouped_inputs
 
 
 def compute_correctness(df: pd.DataFrame) -> float:

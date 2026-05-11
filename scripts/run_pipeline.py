@@ -36,6 +36,11 @@ parser.add_argument(
     # default=":".join([DEFAULT_MODEL_PROVIDER, DEFAULT_MODEL]),
 )
 parser.add_argument(
+    "--dataset",
+    type=str,
+    choices=["siq2", "siq2long"]
+)
+parser.add_argument(
     "--split",
     type=str,
     choices=["train", "val", "test", "demo"],

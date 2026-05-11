@@ -8,7 +8,6 @@ from tqdm import tqdm
 
 from social_memory.constants import PipelineNames
 from social_memory.pipelines.base import BasePipeline
-from social_memory.utils import load_audios
 
 
 class AudioPipeline(BasePipeline):

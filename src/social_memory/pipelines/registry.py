@@ -7,6 +7,7 @@ from typing import Type
 from social_memory.constants import PipelineNames
 from social_memory.pipelines.base import BasePipeline
 from social_memory.pipelines.audio_baseline import AudioPipeline
+from social_memory.pipelines.oracle_find_hf import OracleFindPipeline
 from social_memory.pipelines.text_baseline import LanguagePipeline
 from social_memory.pipelines.sensory_deprivation import SensoryDeprivationPipeline
 from social_memory.pipelines.video_baseline import VideoPipeline
@@ -18,4 +19,5 @@ PIPELINE_REGISTRY: dict[str, Type[BasePipeline]] = {
     PipelineNames.AUDIO: AudioPipeline,
     "sensory_deprivation": SensoryDeprivationPipeline,
     "video_clipped": VideoClippedPipeline,
+    "oracle_find": OracleFindPipeline
 }

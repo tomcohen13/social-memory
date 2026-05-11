@@ -30,8 +30,8 @@ class PipelineConfig(BaseModel):
     split: str
     dataset: str = Datasets.SIQ2LONG.value
     experiment_name: str
-    batch_size: int = 2
-    max_concurrency: int = 4
+    batch_size: int = 1
+    max_concurrency: int = 1
     transform_configs: Dict = {}  # optional dict of configs to be passed to respective transform functions.
     gcs_bucket: str | None = GCS_BUCKET
     gcs_prefix: str = GCS_PREFIX
@@ -132,12 +132,13 @@ class BasePipeline(ABC):
     def _create_logger(self) -> logging.Logger:
         """Create logger for pipeline."""
         os.makedirs("logs", exist_ok=True)
+        normalized_model_name = self.configs.model.replace(":", "_").replace("/", "_")
         logging.basicConfig(
             level=logging.INFO,
             format='%(asctime)s - %(levelname)s - %(message)s',
             handlers=[
                 logging.FileHandler(
-                    f'logs/{self.NAME}_{self.configs.model.replace(":", "_")}_{self.configs.split}.log'
+                    f'logs/{self.NAME}_{self.configs.dataset}_{self.configs.split}_{normalized_model_name}_.log'
                 ),
                 logging.StreamHandler(sys.stdout)
             ]
