@@ -93,6 +93,7 @@ image = (
         "wheel",
         "fastapi",
         "python-multipart",
+        "google-cloud-storage",
     )
     .run_commands(f"pip install {FLASH_ATTN_WHEEL}")
     # flash-attn's prebuilt wheel omits the optional `dropout_layer_norm` CUDA
@@ -140,6 +141,9 @@ hf_secret = modal.Secret.from_name("huggingface")
 api_key_secret = modal.Secret.from_name(
     "internvideo-api-key", required_keys=["API_KEY"]
 )
+gcp_secret = modal.Secret.from_name(
+    "gcp-credentials", required_keys=["GOOGLE_APPLICATION_CREDENTIALS_JSON"]
+)
 
 
 @app.function(
@@ -178,14 +182,24 @@ def download_weights() -> None:
 @app.cls(
     gpu="A10G",
     volumes={WEIGHTS_DIR: weights_vol},
-    secrets=[hf_secret, api_key_secret],
+    secrets=[hf_secret, api_key_secret, gcp_secret],
     scaledown_window=600,
     timeout=1800,
 )
 class InternVideo2Stage2:
     @modal.enter()
     def load(self) -> None:
+        import os
         import sys
+
+        # google-cloud-storage's ADC needs a file path, but the Modal secret
+        # holds the SA key as a JSON string. Materialize it once at startup.
+        sa_json = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+        if sa_json:
+            sa_path = "/tmp/gcp-sa.json"
+            with open(sa_path, "w") as f:
+                f.write(sa_json)
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = sa_path
 
         sys.path.insert(0, MULTI_MODALITY_DIR)
 
@@ -312,16 +326,35 @@ class InternVideo2Stage2:
         import urllib.error
         import urllib.request
 
-        if not url.startswith(("http://", "https://")):
-            raise ValueError("video_url must be http(s)")
-        req = urllib.request.Request(
-            url, headers={"User-Agent": "internvideo2-modal/1.0"}
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=DOWNLOAD_TIMEOUT_S) as resp:
-                data = resp.read(MAX_VIDEO_BYTES + 1)
-        except urllib.error.URLError as e:
-            raise ValueError(f"failed to fetch video: {e}")
+        if url.startswith("gs://"):
+            from google.cloud import storage
+
+            bucket_name, _, blob_name = url[len("gs://"):].partition("/")
+            if not bucket_name or not blob_name:
+                raise ValueError("gs:// url must be gs://<bucket>/<object>")
+            blob = storage.Client().bucket(bucket_name).blob(blob_name)
+            try:
+                # Size-check first so we don't pull a 10GB object before failing.
+                blob.reload()
+                if blob.size is not None and blob.size > MAX_VIDEO_BYTES:
+                    raise ValueError(
+                        f"video exceeds {MAX_VIDEO_BYTES} byte limit"
+                    )
+                data = blob.download_as_bytes(timeout=DOWNLOAD_TIMEOUT_S)
+            except Exception as e:
+                raise ValueError(f"failed to fetch video: {e}")
+        elif url.startswith(("http://", "https://")):
+            req = urllib.request.Request(
+                url, headers={"User-Agent": "internvideo2-modal/1.0"}
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=DOWNLOAD_TIMEOUT_S) as resp:
+                    data = resp.read(MAX_VIDEO_BYTES + 1)
+            except urllib.error.URLError as e:
+                raise ValueError(f"failed to fetch video: {e}")
+        else:
+            raise ValueError("video_url must be http(s):// or gs://")
+
         if not data:
             raise ValueError("downloaded video is empty")
         if len(data) > MAX_VIDEO_BYTES:

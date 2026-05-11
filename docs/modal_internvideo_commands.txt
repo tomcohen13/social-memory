@@ -42,3 +42,38 @@ echo ${#API_KEY}
 -- Admin: persist key for future shells --
 echo "export API_KEY=$API_KEY" > ~/.internvideo.env
 source ~/.internvideo.env
+
+
+GCS private-bucket support (ego-social / siq2/video)
+=====================================================
+SA email: social-memory-reader@boxwood-ellipse-474120-r3.iam.gserviceaccount.com
+Key file (local, gitignored): /Users/sheerkarny/Documents/social-memory/social-memory-key.json
+
+-- 1. Verify the SA can list objects under the prefix (uses local google-cloud-storage) --
+GOOGLE_APPLICATION_CREDENTIALS=/Users/sheerkarny/Documents/social-memory/social-memory-key.json python -c "from google.cloud import storage; print([b.name for b in storage.Client().bucket('ego-social').list_blobs(prefix='siq2/video', max_results=3)])"
+
+-- 1b. If google-cloud-storage isn't installed locally, install it (uv) --
+uv pip install google-cloud-storage
+
+-- 1c. Alternative verification using gcloud (no Python deps) --
+gcloud auth activate-service-account --key-file=/Users/sheerkarny/Documents/social-memory/social-memory-key.json
+
+-- 1d. Then list (after activating the SA above) --
+gcloud storage ls gs://ego-social/siq2/video/ --limit=3
+
+-- 2. Create the Modal secret holding the SA JSON (overwrites in place) --
+modal secret create gcp-credentials GOOGLE_APPLICATION_CREDENTIALS_JSON="$(cat /Users/sheerkarny/Documents/social-memory/social-memory-key.json)" --force
+
+-- 3. After code changes land: force a fresh container then redeploy --
+modal app stop internvideo2-stage2-1b
+modal deploy scripts/modal_internvideo.py
+
+-- 4. Smoke-test with a real gs:// clip from the ego-social bucket --
+python scripts/test_modal_endpoint.py --video gs://ego-social/siq2/video/-99aZZhUgRk.mp4
+
+-- 4b. Other known-good clips (from the earlier list_blobs verification) --
+python scripts/test_modal_endpoint.py --video gs://ego-social/siq2/video/-9NhaKWMtWU.mp4
+python scripts/test_modal_endpoint.py --video gs://ego-social/siq2/video/-Lp96hoSUC8.mp4
+
+-- 5. If you see 403 from the endpoint, check the server logs for the GCS error --
+modal app logs internvideo2-stage2-1b
