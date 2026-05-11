@@ -71,6 +71,32 @@ class XCLIPEncoder(torch.nn.Module):
         return text_emb
 
 
+class RemoteInternVideoEncoder:
+    """InternVideo2 Stage2-1B served on Modal. Mirrors XCLIPEncoder's interface.
+
+    Requires scripts/modal_internvideo.py to be deployable (modal token + HF secret
+    + a one-time `modal run scripts/modal_internvideo.py::download_weights`).
+    """
+
+    def __init__(self) -> None:
+        from scripts.modal_internvideo import InternVideo2Stage2
+
+        self._cls = InternVideo2Stage2()
+        self.num_frames = int(self._cls.num_frames_required.remote())
+
+    def __call__(self, frames: list[np.ndarray], transcript: str) -> XCLIPEncoderOutput:
+        arr = np.stack(frames)
+        out = self._cls.encode.remote(arr, transcript)
+        return {
+            "text_embeddings": torch.from_numpy(out["text_embeddings"]),
+            "video_embeddings": torch.from_numpy(out["video_embeddings"]),
+            "fused_embeddings": torch.from_numpy(out["fused_embeddings"]),
+        }
+
+    def encode_text(self, text: str) -> torch.Tensor:
+        return torch.from_numpy(self._cls.encode_text.remote(text))
+
+
 def _decoded_frame_count(video_path: Path) -> int:
     with av.open(str(video_path)) as container:
         return sum(1 for _ in container.decode(video=0))

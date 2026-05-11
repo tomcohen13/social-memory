@@ -58,7 +58,10 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [dependency-groups]
-dev = ["pytest>=8.0"]
+dev = [
+    "fastapi>=0.136.1",
+    "pytest>=8.0",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

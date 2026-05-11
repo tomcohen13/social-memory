@@ -1,0 +1,44 @@
+InternVideo2 Modal endpoint — copy/paste commands
+==================================================
+Endpoint URL:
+  https://cyborgpsychologylab--internvideo2-stage2-1b-internvideo2-bba4fc.modal.run
+
+Each command below is one line. Copy a single line at a time.
+
+
+-- Test endpoint with default sample video --
+python scripts/test_modal_endpoint.py
+
+-- Test with a known-good sample video (samplelib) --
+python scripts/test_modal_endpoint.py --video https://download.samplelib.com/mp4/sample-5s.mp4
+
+-- Check if a video URL is fetchable from Python (matches server behavior) --
+python -c "import urllib.request; print(len(urllib.request.urlopen('https://download.samplelib.com/mp4/sample-5s.mp4', timeout=30).read()))"
+
+-- Check a URL with Mozilla User-Agent (some CDNs block default Python UA) --
+python -c "import urllib.request; r=urllib.request.Request('https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4', headers={'User-Agent':'Mozilla/5.0'}); print(len(urllib.request.urlopen(r, timeout=30).read(1000)))"
+
+
+-- Admin: redeploy --
+modal deploy scripts/modal_internvideo.py
+
+-- Admin: stop running containers (forces fresh start on next call) --
+modal app stop internvideo2-stage2-1b
+
+-- Admin: tail logs --
+modal app logs internvideo2-stage2-1b
+
+-- Admin: list secrets --
+modal secret list
+
+-- Admin: rotate API key (use --force to overwrite, NOT delete+create) --
+export API_KEY=$(openssl rand -hex 24)
+modal secret create internvideo-api-key API_KEY="$API_KEY" --force
+modal deploy scripts/modal_internvideo.py
+
+-- Admin: check the key is set in your shell --
+echo ${#API_KEY}
+
+-- Admin: persist key for future shells --
+echo "export API_KEY=$API_KEY" > ~/.internvideo.env
+source ~/.internvideo.env
