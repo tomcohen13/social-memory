@@ -2,8 +2,9 @@
 
 Usage:
     export API_KEY=<your key>
-    python scripts/test_modal_endpoint.py
-    python scripts/test_modal_endpoint.py --url <endpoint> --video <mp4 url> --text "..."
+    python scripts/test_modal_endpoint.py                       # default video + text
+    python scripts/test_modal_endpoint.py --video <mp4 url> --text "..."
+    python scripts/test_modal_endpoint.py --text-only --text "a question to embed"
 """
 
 from __future__ import annotations
@@ -28,6 +29,8 @@ def main() -> int:
     p.add_argument("--url", default=DEFAULT_URL)
     p.add_argument("--video", default=DEFAULT_VIDEO)
     p.add_argument("--text", default=DEFAULT_TEXT)
+    p.add_argument("--text-only", action="store_true",
+                   help="Skip video; embed only the --text string (for query encoding).")
     p.add_argument("--timeout", type=float, default=300.0)
     args = p.parse_args()
 
@@ -36,7 +39,10 @@ def main() -> int:
         print("ERROR: API_KEY env var not set. Run: export API_KEY=<your key>")
         return 2
 
-    body = json.dumps({"video_url": args.video, "text": args.text}).encode()
+    request_body = {"text": args.text}
+    if not args.text_only:
+        request_body["video_url"] = args.video
+    body = json.dumps(request_body).encode()
     req = urllib.request.Request(
         args.url,
         data=body,
@@ -48,7 +54,10 @@ def main() -> int:
     )
 
     print(f"POST {args.url}")
-    print(f"  video: {args.video}")
+    if args.text_only:
+        print("  mode:  text-only")
+    else:
+        print(f"  video: {args.video}")
     print(f"  text:  {args.text!r}")
     print(f"  key:   len={len(api_key)} (first 4 = {api_key[:4]}…)")
     print("waiting for response (cold start can take ~60s)…")
