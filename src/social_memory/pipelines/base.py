@@ -3,6 +3,7 @@ import os
 import re
 import sys
 import logging
+import pandas as pd
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -30,6 +31,7 @@ class PipelineConfig(BaseModel):
     split: str
     dataset: str = Datasets.SIQ2LONG.value
     experiment_name: str
+    run_id: str | None = None
     batch_size: int = 1
     max_concurrency: int = 1
     transform_configs: Dict = {}  # optional dict of configs to be passed to respective transform functions.
@@ -65,7 +67,7 @@ class BasePipeline(ABC):
     def __init__(self, configs: PipelineConfig) -> None:
         self.configs = configs
         self.logger: logging.Logger = self._create_logger()
-        self.run_id = self._generate_run_id()
+        self.run_id = configs.run_id or self._generate_run_id()
         self.path_to_output = self._create_output_file_path()
         self.model_runner = None
         self.prompt_template = None
@@ -182,7 +184,7 @@ class BasePipeline(ABC):
     def _load_model(self) -> BaseChatModel:
         """Load LLM with restrictions"""
 
-        model_provider, model = self.configs.model.split(":")
+        model_provider, model = self.configs.model.split(":", 1)
         normalized_provider = model_provider.replace("-", "_")
 
         if normalized_provider in ["openai", "anthropic", "google_genai"]:
@@ -282,6 +284,10 @@ class BasePipeline(ABC):
 
         self.logger.info("loading dataset...")
         dataset = load_dataset(self.configs.dataset, split=self.configs.split)
+        results = pd.read_json(self.path_to_output, lines=True)
+        results_id = results["qid"]
+        dataset = dataset[~dataset.isin(results_id)].reset_index(drop=True)
+
 
         batch_size = self.configs.batch_size
         n_batches = len(range(0, len(dataset), batch_size))
