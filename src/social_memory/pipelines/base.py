@@ -203,7 +203,7 @@ class BasePipeline(ABC):
                 base_url="https://openrouter.ai/api/v1/",
                 api_key=os.getenv("OPENROUTER_API_KEY"),
                 model_name="/".join([normalized_provider, model]),
-                max_tokens=10,
+                max_tokens=2048,
                 timeout=30,
             )
 
