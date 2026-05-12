@@ -66,7 +66,7 @@ Five models across **Google (Gemini)**, **OpenAI**, **Meta (Llama)**, and **Qwen
 <th align="left">Provider</th>
 <th align="left">Model</th>
 <th align="center">Modalities</th>
-<th align="right">Validation accuracy</th>
+<th align="right">1 min (original)</th>
 <th align="right">&lt; 5 min</th>
 </tr>
 </thead>
@@ -97,7 +97,14 @@ Five models across **Google (Gemini)**, **OpenAI**, **Meta (Llama)**, and **Qwen
 <td align="left"><code>gemini-2.5-flash</code></td>
 <td align="center"><code>text</code></td>
 <td align="right"><strong>73.81%</strong></td>
-<td align="right">—</td>
+<td align="right"><strong>-</strong></td>
+</tr>
+<tr>
+<td align="left"><img src="assets/google.svg" width="22" height="22" alt="Google" valign="middle" /></td>
+<td align="left"><code>gemini-2.5-flash</code></td>
+<td align="center"><code>video</code></td>
+<td align="right"><strong>-</strong></td>
+<td align="right"><strong>61.21%</strong></td>
 </tr>
 <tr>
 <td align="left"><img src="assets/openai.svg" width="22" height="22" alt="Google" valign="middle" /></td>

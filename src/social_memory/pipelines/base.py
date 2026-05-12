@@ -284,10 +284,10 @@ class BasePipeline(ABC):
 
         self.logger.info("loading dataset...")
         dataset = load_dataset(self.configs.dataset, split=self.configs.split)
-        results = pd.read_json(self.path_to_output, lines=True)
-        results_id = results["qid"]
-        dataset = dataset[~dataset.isin(results_id)].reset_index(drop=True)
-
+        if os.path.exists(self.path_to_output):
+            results = pd.read_json(self.path_to_output, lines=True)
+            results_id = results["qid"]
+            dataset = dataset[~dataset.isin(results_id)].reset_index(drop=True)
 
         batch_size = self.configs.batch_size
         n_batches = len(range(0, len(dataset), batch_size))
