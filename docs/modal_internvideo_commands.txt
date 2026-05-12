@@ -75,5 +75,8 @@ python scripts/test_modal_endpoint.py --video gs://ego-social/siq2/video/-99aZZh
 python scripts/test_modal_endpoint.py --video gs://ego-social/siq2/video/-9NhaKWMtWU.mp4
 python scripts/test_modal_endpoint.py --video gs://ego-social/siq2/video/-Lp96hoSUC8.mp4
 
+-- 4c. Text-only embedding (for retrieval queries — returns just text_embeddings) --
+python scripts/test_modal_endpoint.py --text-only --text "two people arguing at a table"
+
 -- 5. If you see 403 from the endpoint, check the server logs for the GCS error --
 modal app logs internvideo2-stage2-1b

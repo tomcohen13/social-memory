@@ -42,8 +42,9 @@ DOWNLOAD_TIMEOUT_S = 60
 
 
 class EncodeRequest(BaseModel):
-    video_url: str
     text: str
+    # Optional: omit (or null) to get a text-only embedding for retrieval queries.
+    video_url: str | None = None
 
 
 HF_MODEL_ID = "OpenGVLab/InternVideo2-Stage2_1B-224p-f4"
@@ -250,8 +251,7 @@ class InternVideo2Stage2:
         """
         return self._encode(frames, transcript)
 
-    @modal.method()
-    def encode_text(self, text: str):
+    def _encode_text(self, text: str):
         import torch.nn.functional as F
 
         torch = self._torch
@@ -260,21 +260,31 @@ class InternVideo2Stage2:
             emb = F.normalize(emb, dim=-1)
         return emb.float().cpu().numpy()
 
+    @modal.method()
+    def encode_text(self, text: str):
+        return self._encode_text(text)
+
     @modal.fastapi_endpoint(method="POST", docs=True)
     def encode_video(
         self,
         payload: EncodeRequest,
         x_api_key: str | None = Header(default=None),
     ):
-        """POST {"video_url": "...", "text": "..."} → JSON embeddings.
+        """POST {"text": "...", "video_url": "..."} → JSON embeddings.
 
-        Server fetches the video over HTTPS, samples NUM_FRAMES frames, and
-        returns three unit-norm 512-d vectors as plain JSON lists.
+        With `video_url`: server fetches the video, samples NUM_FRAMES frames,
+        and returns three unit-norm 512-d vectors (video, text, fused).
+        Without `video_url`: returns only `text_embeddings` — use this for
+        query encoding in retrieval pipelines.
         """
         import os
 
         if x_api_key != os.environ["API_KEY"]:
             raise HTTPException(status_code=401, detail="invalid or missing api key")
+
+        if not payload.video_url:
+            text_emb = self._encode_text(payload.text)
+            return {"text_embeddings": text_emb.squeeze(0).tolist()}
 
         try:
             video_bytes = self._download(payload.video_url)
