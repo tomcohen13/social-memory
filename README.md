@@ -68,8 +68,7 @@ Five models across **Google (Gemini)**, **OpenAI**, **Meta (Llama)**, and **Qwen
 <th align="center">Modalities</th>
 <th align="right">1 min (original)</th>
 <th align="right">&lt; 5 min</th>
-<th align="right">5 min</th>
-<th align="right">10 min</th>
+<th align="right">&lt; 10 min</th>
 </tr>
 </thead>
 <tbody>
@@ -78,7 +77,6 @@ Five models across **Google (Gemini)**, **OpenAI**, **Meta (Llama)**, and **Qwen
 <td align="left"><code>gemini-2.5-pro</code></td>
 <td align="center"><code>video</code><code>audio</code></td>
 <td align="right"><strong>81.76%</strong></td>
-<td align="right">—</td>
 <td align="right"><strong>78.62%</strong></td>
 <td align="right"><strong>77.65%</strong></td>
 </tr>
@@ -89,14 +87,12 @@ Five models across **Google (Gemini)**, **OpenAI**, **Meta (Llama)**, and **Qwen
 <td align="right"><strong>77.84%</strong></td>
 <td align="right">—</td>
 <td align="right">—</td>
-<td align="right">—</td>
-</tr>  
+</tr>
 <tr>
 <td align="left"><img src="assets/google.svg" width="22" height="22" alt="Google" valign="middle" /></td>
 <td align="left"><code>gemini-2.5-pro</code></td>
 <td align="center"><code>video</code></td>
 <td align="right"><strong>74.14%</strong></td>
-<td align="right">—</td>
 <td align="right"><strong>70.13%</strong></td>
 <td align="right"><strong>68.83%</strong></td>
 </tr>
@@ -107,23 +103,12 @@ Five models across **Google (Gemini)**, **OpenAI**, **Meta (Llama)**, and **Qwen
 <td align="right"><strong>73.81%</strong></td>
 <td align="right">—</td>
 <td align="right">—</td>
-<td align="right">—</td>
 </tr>
 <tr>
-<td align="left"><img src="assets/google.svg" width="22" height="22" alt="Google" valign="middle" /></td>
-<td align="left"><code>gemini-2.5-flash</code></td>
-<td align="center"><code>video</code></td>
-<td align="right">—</td>
-<td align="right"><strong>61.21%</strong></td>
-<td align="right">—</td>
-<td align="right">—</td>
-</tr>
-<tr>
-<td align="left"><img src="assets/openai.svg" width="22" height="22" alt="Google" valign="middle" /></td>
+<td align="left"><img src="assets/openai.svg" width="22" height="22" alt="OpenAI" valign="middle" /></td>
 <td align="left"><code>gpt-4o-preview</code></td>
 <td align="center"><code>audio</code></td>
 <td align="right"><strong>70.86%</strong></td>
-<td align="right">—</td>
 <td align="right">—</td>
 <td align="right">—</td>
 </tr>
@@ -134,15 +119,21 @@ Five models across **Google (Gemini)**, **OpenAI**, **Meta (Llama)**, and **Qwen
 <td align="right"><strong>69.65%</strong></td>
 <td align="right">—</td>
 <td align="right">—</td>
+</tr>
+<tr>
+<td align="left"><img src="assets/google.svg" width="22" height="22" alt="Google" valign="middle" /></td>
+<td align="left"><code>gemini-2.5-flash</code></td>
+<td align="center"><code>video</code></td>
+<td align="right">—</td>
+<td align="right"><strong>61.21%</strong></td>
 <td align="right">—</td>
 </tr>
 <tr>
-<td align="left"><img src="assets/google.svg" width="22" height="22" alt="Meta" valign="middle" /></td>
+<td align="left"><img src="assets/google.svg" width="22" height="22" alt="Google" valign="middle" /></td>
 <td align="left"><code>Gemma 4 31B</code></td>
 <td align="center"><code>video</code></td>
 <td align="right"><strong>66.83%</strong></td>
 <td align="right"><strong>63.65%</strong></td>
-<td align="right">—</td>
 <td align="right">—</td>
 </tr>
 <tr>
@@ -152,7 +143,6 @@ Five models across **Google (Gemini)**, **OpenAI**, **Meta (Llama)**, and **Qwen
 <td align="right"><strong>62.80%</strong></td>
 <td align="right"><strong>59.36%</strong></td>
 <td align="right">—</td>
-<td align="right">—</td>
 </tr>
 <tr>
 <td align="left"><img src="assets/openai.svg" width="22" height="22" alt="OpenAI" valign="middle" /></td>
@@ -161,14 +151,12 @@ Five models across **Google (Gemini)**, **OpenAI**, **Meta (Llama)**, and **Qwen
 <td align="right"><strong>58.31%</strong></td>
 <td align="right">—</td>
 <td align="right">—</td>
-<td align="right">—</td>
 </tr>
 <tr>
 <td align="left"><img src="assets/nvidia.svg" width="22" height="22" alt="NVIDIA" valign="middle" /></td>
 <td align="left"><code>Nemotron Nano 12B 2 VL</code></td>
 <td align="center"><code>video</code></td>
 <td align="right"><strong>51.53%</strong></td>
-<td align="right">—</td>
 <td align="right">—</td>
 <td align="right">—</td>
 </tr>
