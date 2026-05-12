@@ -1,6 +1,7 @@
 """LLM utils"""
 
 from __future__ import annotations
+import json
 
 import pandas as pd
 import subprocess
@@ -17,32 +18,42 @@ from social_memory.constants import (
     SIQDatasetColumns,
 )
 
-def load_dataset(dataset_name: str, split: str) -> pd.DataFrame:
+def load_dataset(dataset_name: str, split: str, with_oracle: bool = True) -> pd.DataFrame:
 
-    split_qids = load_qa_dataset(dataset_name, split, with_oracle=False)["qid"].unique()
+    split_qids = load_qa_dataset(dataset_name, split)["qid"].unique()
     df = pd.read_csv(DATASET_TO_DIR.get(dataset_name) / "dataset.csv").drop_duplicates("qid")
     df["num_chunks"] = df["chunk_ids"].apply(lambda x: len(eval(x)))
     df["oracle_idx"] = df["oracle_idx"].apply(int)
-    return df[df["qid"].isin(split_qids)].reset_index(drop=True)
+    df = df[df["qid"].isin(split_qids)].reset_index(drop=True)
+    if with_oracle:
+        import json
+        with open(DATASET_TO_DIR.get(dataset_name) / "oracles.json", "r") as j:
+            oracles = json.load(j)
+            df["oracle"] = df[SIQDatasetColumns.VIDEO_ID].map(oracles)
+    return df
 
-def load_qa_dataset(dataset: str, split: str, with_oracle: bool = True) -> pd.DataFrame:
+def load_qa_dataset(dataset: str, split: str) -> pd.DataFrame:
     """
     Load QA dataset from json file
     """
     path = DATASET_TO_DIR.get(dataset) / DirPaths.QA / f"qa_{split}.json"
     print(f"trying to read file: {path}...")
     qa = pd.read_json(path, lines=True)
-    # if with_oracle:
-    #     import json
-    #     with open(PATH_TO_DATA / "trims.json", "r") as j:
-    #         oracles = json.load(j)
-    #         oracles = {vid: (start, start + 60.0) for vid, start in oracles.items()}
-    #         qa["oracle"] = qa[SIQDatasetColumns.VIDEO_ID].map(oracles)
     return qa
 
 
 def read_vtt_file(vtt_path: Path) -> str:
-    return "\n".join(caption.text for caption in webvtt.read(str(vtt_path)))
+    captions = []
+    for caption in webvtt.read(str(vtt_path)):
+        for subcaption in caption.text.split("\n"):
+            if captions == []:
+                captions.append(subcaption.strip())
+            elif captions[-1] in subcaption:
+                captions[-1] = subcaption.strip()
+            else:
+                captions.append(subcaption.strip())
+
+    return "\n".join(captions)
 
 
 def group_inputs_by_video_id(inputs: List[dict]) -> List[dict]:

@@ -20,7 +20,7 @@ from tqdm.asyncio import tqdm
 from social_memory.constants import GCS_BUCKET, GCS_PREFIX, RESULTS_DIR, Datasets
 from social_memory.prompts import PROMPT_REGISTRY
 from social_memory.transforms import TransformList
-from social_memory.utils import load_qa_dataset
+from social_memory.utils import load_dataset
 
 
 class PipelineConfig(BaseModel):
@@ -281,7 +281,7 @@ class BasePipeline(ABC):
         start_time = datetime.now()
 
         self.logger.info("loading dataset...")
-        dataset = load_qa_dataset(dataset=self.configs.dataset, split=self.configs.split, with_oracle=True)
+        dataset = load_dataset(self.configs.dataset, split=self.configs.split)
 
         batch_size = self.configs.batch_size
         n_batches = len(range(0, len(dataset), batch_size))

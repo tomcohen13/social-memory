@@ -23,8 +23,10 @@ CHECKPOINT_REGISTRY: dict[str, dict] = {
     "clip-vit-b32":   {"checkpoint": "openai/clip-vit-base-patch32",           "model_type": "clip"},
     "clip-vit-l14":   {"checkpoint": "openai/clip-vit-large-patch14",          "model_type": "clip"},
     # SigLIP — sigmoid-loss CLIP variant, generally stronger retrieval
-    "siglip-base":    {"checkpoint": "google/siglip-base-patch16-224",         "model_type": "siglip"},
-    "siglip-so400m":  {"checkpoint": "google/siglip-so400m-patch14-384",       "model_type": "siglip"},
+    "siglip-base":      {"checkpoint": "google/siglip-base-patch16-224",         "model_type": "siglip"},
+    "siglip-so400m":    {"checkpoint": "google/siglip-so400m-patch14-384",       "model_type": "siglip"},
+    # SigLIP2 — improved SigLIP with better scaling and multilingual support
+    "siglip2-so400m":   {"checkpoint": "google/siglip2-so400m-patch14-384",      "model_type": "siglip2"},
 }
 
 
@@ -81,9 +83,10 @@ class HFVideoTextEncoder(ABC, nn.Module):
         model_type = config.model_type
 
         builtin: dict[str, type[HFVideoTextEncoder]] = {
-            "xclip":  XCLIPHFEncoder,
-            "clip":   CLIPHFEncoder,
-            "siglip": SiglipHFEncoder,
+            "xclip":   XCLIPHFEncoder,
+            "clip":    CLIPHFEncoder,
+            "siglip":  SiglipHFEncoder,
+            "siglip2": Siglip2HFEncoder,
         }
         registry = {**builtin, **cls._registry}
 
@@ -236,6 +239,44 @@ class SiglipHFEncoder(HFVideoTextEncoder):
         device = self.model.device
         inputs = self.tokenizer(
             texts,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+        ).to(device)
+        return F.normalize(self.model.get_text_features(**inputs).pooler_output, dim=-1)
+
+
+class Siglip2HFEncoder(HFVideoTextEncoder):
+    """Frame-averaged SigLIP2 encoder (google/siglip2-*). Video via frame averaging."""
+
+    DEFAULT_NUM_FRAMES = 32
+
+    def __init__(self, checkpoint: str, num_frames: int = DEFAULT_NUM_FRAMES, **_):
+        super().__init__()
+        from transformers import AutoModel, AutoProcessor
+
+        self.processor = AutoProcessor.from_pretrained(checkpoint)
+        self.model = AutoModel.from_pretrained(checkpoint)
+        self.model.requires_grad_(False)
+        self.num_frames = num_frames
+
+    @torch.inference_mode()
+    def encode_video(self, frames: list[list[np.ndarray]]) -> torch.Tensor:
+        device = self.model.device
+        chunk_embeds = []
+        for chunk_frames in frames:
+            inputs = self.processor(images=chunk_frames, return_tensors="pt").to(device)
+            frame_embeds = self.model.get_image_features(**inputs)       # (F, D)
+            frame_embeds = F.normalize(frame_embeds.pooler_output, dim=-1)
+            chunk_embed = F.normalize(frame_embeds.mean(dim=0), dim=-1)  # (D,)
+            chunk_embeds.append(chunk_embed)
+        return torch.stack(chunk_embeds)                                  # (N, D)
+
+    @torch.inference_mode()
+    def encode_text(self, texts: list[str]) -> torch.Tensor:
+        device = self.model.device
+        inputs = self.processor(
+            text=texts,
             return_tensors="pt",
             padding=True,
             truncation=True,

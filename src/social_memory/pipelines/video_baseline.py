@@ -1,7 +1,7 @@
 """Test zero-shot performance of LLMs on video data"""
 from typing import List, Dict
 
-from social_memory.constants import PipelineNames
+from social_memory.constants import GCS_BUCKET, GCS_PREFIX, PipelineNames
 from social_memory.pipelines.base import BasePipeline
 from social_memory.transforms import Transform, TransformList, apply_transform_with_concurrency
 from social_memory.transforms.video import (
@@ -25,12 +25,12 @@ class VideoPipeline(BasePipeline):
     def __init__(self, configs):
         super().__init__(configs)
 
-        if configs.gcs_bucket:
+        if configs.dataset == "siq2long":
             self.logger.info(f"Video source: GCS — gs://{configs.gcs_bucket}/{configs.gcs_prefix}")
             load_video = Transform(
                 load_video_from_gcs,
-                bucket_name=configs.gcs_bucket,
-                prefix=configs.gcs_prefix,
+                bucket_name=configs.gcs_bucket or GCS_BUCKET,
+                prefix=configs.gcs_prefix or GCS_PREFIX,
             )
         else:
             from social_memory.constants import PATH_TO_DATA, DirPaths

@@ -1,6 +1,8 @@
 
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
+from functools import partial
 import os
 import torch
 import torch.nn as nn
@@ -13,7 +15,7 @@ import pandas as pd
 from social_memory.constants import SIQDatasetColumns
 from social_memory.pipelines.base import BasePipeline
 from social_memory.transforms import TransformList, apply_transform_with_concurrency
-from social_memory.utils import check_device, load_dataset, group_inputs_by_video_id
+from social_memory.utils import check_device, load_dataset, group_inputs_by_video_id, read_vtt_file
 from social_memory.constants import GCS_BUCKET, GCS_CHUNKS_PREFIX
 from social_memory.gcs import list_blobs, download_to_temp
 from social_memory.encoders.xclip import sample_frames
@@ -45,11 +47,7 @@ class OracleFindPipeline(BasePipeline):
     async def process_inputs(self, inputs: List[dict]) -> List[dict]:
 
         for transform in self.transforms:
-            inputs = await apply_transform_with_concurrency(
-                transform=transform,
-                inputs=inputs,
-                max_concurrency=self.configs.max_concurrency,
-            )
+            inputs = await transform(inputs)
 
         # to_df_rows expands each grouped input into a list of per-question dicts;
         # flatten so callers get a single list of rows.
@@ -64,19 +62,16 @@ class OracleFindPipeline(BasePipeline):
         video_id = input.get(SIQDatasetColumns.VIDEO_ID.value)
 
         print("Downloading frames, transcripts")
-        for blob in list_blobs(GCS_BUCKET, GCS_CHUNKS_PREFIX + f"/{video_id}/"):
-            path = Path(blob.name)
-            chunk_idx = int(path.stem)
-            ext = path.suffix
-            if ext == ".mp4":
-                with download_to_temp(GCS_BUCKET, blob.name) as tmp_chunk_path:
-                    frames = sample_frames(tmp_chunk_path, num_frames=self.encoder.num_frames)
-                chunks[chunk_idx]["frames"] = frames
-            elif ext == ".vtt":
-                chunks[chunk_idx]["transcript"] = blob.download_as_text()
-        
+        blobs = list(list_blobs(GCS_BUCKET, GCS_CHUNKS_PREFIX + f"/{video_id}/"))
+        with ThreadPoolExecutor(max_workers=16) as ex:
+            futures = [ex.submit(partial(process_blob, num_frames=self.encoder.num_frames), b) for b in blobs]
+            for f in as_completed(futures):
+                result = f.result()
+                if result:
+                    chunk_idx, key, value = result
+                    chunks[chunk_idx][key] = value
+
         assert len(chunks) == input["num_chunks"]
-        assert all([chunks[k]["frames"] and chunks[k]["transcript"] for k in chunks])
         input["chunks"] = chunks
         return input
 
@@ -91,7 +86,7 @@ class OracleFindPipeline(BasePipeline):
 
         with torch.no_grad():
             video_embeddings: torch.Tensor = self.encoder.encode_video(
-                frames=[chunks[chunk_id]["frames"] for chunk_id in ordered_chunk_ids],
+                frames=[chunks[chunk_id].pop("frames") for chunk_id in ordered_chunk_ids],
             ).detach().cpu()  # (n_chunks, embed_size)
 
             input["embeddings"]["video_embeddings"] = video_embeddings
@@ -108,6 +103,7 @@ class OracleFindPipeline(BasePipeline):
     
     def compute_embed_similarity(self, input: dict) -> dict:
         """
+        Compute cosine similarity between query embedding and modality embeddings
         """
 
         embeddings = input.pop("embeddings")
@@ -170,13 +166,31 @@ class OracleFindPipeline(BasePipeline):
         inputs = dataset.to_dict(orient='records')
         grouped_inputs = group_inputs_by_video_id(inputs)
 
-        for batch in tqdm(grouped_inputs, desc="videos"):
-            # process_inputs expects List[dict]; one grouped row per video — wrap in a list.
-            batch_results = await self.process_inputs([batch])
-            self.write_results_to_json(batch_results)
+        for video in tqdm(grouped_inputs, desc="videos"):
+            try:
+                batch_results = await self.process_inputs([video])
+                self.write_results_to_json(batch_results)
+            except Exception as e:
+                self.logger.error(f"Failed on video {video.get(SIQDatasetColumns.VIDEO_ID)!r}: {e}")
 
         elapsed_time = (datetime.now() - start_time).total_seconds()
         self.logger.info(f"Finished processing {len(dataset)} documents in {elapsed_time:.1f}s.")
+
+
+def process_blob(blob, num_frames: int):
+    path = Path(blob.name)
+    chunk_idx = int(path.stem)
+    ext = path.suffix
+
+    if ext == ".mp4":
+        with download_to_temp(GCS_BUCKET, blob.name) as tmp_chunk_path:
+            frames = sample_frames(tmp_chunk_path, num_frames=num_frames)
+        return chunk_idx, "frames", frames
+    elif ext == ".vtt":
+        with download_to_temp(GCS_BUCKET, blob.name) as tmp_path:
+            transcript = read_vtt_file(tmp_path)
+        return chunk_idx, "transcript", transcript
+    return None
 
 
 # CONVERT THIS UGLY-ASS THING INTO PIPELINE
