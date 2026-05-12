@@ -6,6 +6,7 @@ from functools import partial
 import os
 import torch
 import torch.nn as nn
+import traceback
 
 from pathlib import Path
 from typing import List
@@ -47,7 +48,7 @@ class OracleFindPipeline(BasePipeline):
     async def process_inputs(self, inputs: List[dict]) -> List[dict]:
 
         for transform in self.transforms:
-            inputs = await transform(inputs)
+            inputs = await apply_transform_with_concurrency(transform, inputs, max_concurrency=1)
 
         # to_df_rows expands each grouped input into a list of per-question dicts;
         # flatten so callers get a single list of rows.
@@ -163,6 +164,12 @@ class OracleFindPipeline(BasePipeline):
 
         self.logger.info("loading dataset...")
         dataset = load_dataset(dataset_name=self.configs.dataset, split=self.configs.split)
+
+        if os.path.exists(self.path_to_output):
+            results = pd.read_json(self.path_to_output, lines=True)
+            results_id = results["qid"].unique()
+            dataset = dataset[~dataset["qid"].isin(results_id)].reset_index(drop=True)
+
         inputs = dataset.to_dict(orient='records')
         grouped_inputs = group_inputs_by_video_id(inputs)
 
@@ -171,7 +178,7 @@ class OracleFindPipeline(BasePipeline):
                 batch_results = await self.process_inputs([video])
                 self.write_results_to_json(batch_results)
             except Exception as e:
-                self.logger.error(f"Failed on video {video.get(SIQDatasetColumns.VIDEO_ID)!r}: {e}")
+                self.logger.error(f"Failed on video {video.get(SIQDatasetColumns.VIDEO_ID)!r}: {traceback.format_exc()}")
 
         elapsed_time = (datetime.now() - start_time).total_seconds()
         self.logger.info(f"Finished processing {len(dataset)} documents in {elapsed_time:.1f}s.")

@@ -126,7 +126,7 @@ Five models across **Google (Gemini)**, **OpenAI**, **Meta (Llama)**, and **Qwen
 <td align="center"><code>video</code></td>
 <td align="right">—</td>
 <td align="right"><strong>61.21%</strong></td>
-<td align="right">—</td>
+<td align="right">58.55%</td>
 </tr>
 <tr>
 <td align="left"><img src="assets/google.svg" width="22" height="22" alt="Google" valign="middle" /></td>
