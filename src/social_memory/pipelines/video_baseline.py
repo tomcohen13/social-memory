@@ -1,13 +1,16 @@
 """Test zero-shot performance of LLMs on video data"""
+from functools import partial
 from typing import List, Dict
 
-from social_memory.constants import GCS_BUCKET, GCS_PREFIX, PipelineNames
+from tqdm import tqdm
+
+from social_memory.constants import GCS_BUCKET, GCS_PREFIX, PipelineNames, SIQDatasetColumns
 from social_memory.pipelines.base import BasePipeline
-from social_memory.transforms import Transform, TransformList, apply_transform_with_concurrency
+from social_memory.transforms import TransformList, apply_transform_with_concurrency
 from social_memory.transforms.video import (
     encode_video,
     load_video_from_local,
-    load_video_from_gcs,
+    _load_video_from_gcs,
 )
 
 
@@ -27,17 +30,17 @@ class VideoPipeline(BasePipeline):
 
         if configs.dataset == "siq2long":
             self.logger.info(f"Video source: GCS — gs://{configs.gcs_bucket}/{configs.gcs_prefix}")
-            load_video = Transform(
-                load_video_from_gcs,
+            self._load_video = partial(
+                _load_video_from_gcs,
                 bucket_name=configs.gcs_bucket or GCS_BUCKET,
                 prefix=configs.gcs_prefix or GCS_PREFIX,
             )
         else:
             from social_memory.constants import PATH_TO_DATA, DirPaths
             self.logger.info(f"Video source: local — {PATH_TO_DATA / DirPaths.VIDEO}")
-            load_video = load_video_from_local
+            self._load_video = load_video_from_local
 
-        self.transforms = TransformList([load_video, encode_video])
+        self.transforms = TransformList([encode_video])
 
     def _load_model_runner(self) -> None:
         llm = self._load_model()
@@ -59,6 +62,16 @@ class VideoPipeline(BasePipeline):
 
         num_inputs_before = len(inputs)
 
+        video_ids = set(input[SIQDatasetColumns.VIDEO_ID] for input in inputs)
+
+        videos = {}
+        for video_id in tqdm(video_ids):
+            videos[video_id] = self._load_video(video_id)
+        self.logger.info(f"Found and loaded {len(videos)} videos!")
+
+        for input in inputs:
+            input.update(**videos[input[SIQDatasetColumns.VIDEO_ID]])
+        
         for transform in self.transforms:
             # apply each transform to inputs using max_concurrency workers
             self.logger.info(f"Applying transform {transform.__name__}...")

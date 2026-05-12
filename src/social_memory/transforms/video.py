@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import List, Tuple
 
 from social_memory.constants import (
+    GCS_BUCKET,
+    GCS_PREFIX,
     PATH_TO_DATA,
     SIQDatasetColumns,
     DirPaths,
@@ -156,6 +158,46 @@ def encode_video(input: dict) -> dict:
     return input
 
 
+def _load_video_from_gcs(
+    video_id: str,
+    bucket_name: str = GCS_BUCKET,
+    prefix: str = GCS_PREFIX,
+    with_audio: bool = False,
+):
+    """"""
+    with download_to_temp(bucket_name, video_blob_name(video_id, prefix)) as tmp_path:
+        if tmp_path is None:
+            return {
+                SIQDatasetColumns.VIDEO_RAW: None,
+                "duration": None,
+            }
+
+        duration = get_duration(tmp_path)
+
+        ffmpeg_cmd = [
+            "ffmpeg", "-v", "error",
+            "-i", str(tmp_path),
+            "-movflags", "+frag_keyframe+empty_moov",
+            "-f", "mp4",
+        ]
+        if not with_audio:
+            ffmpeg_cmd += ["-map", "0:v:0", "-an"]
+        ffmpeg_cmd += ["-c", "copy", "pipe:1"]
+
+        result = subprocess.run(
+            ffmpeg_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+
+    return {
+        SIQDatasetColumns.VIDEO_RAW: result.stdout,
+        "duration": duration,
+    }
+
+
+
 def load_video_from_gcs(
     input: dict,
     bucket_name: str,
@@ -178,29 +220,6 @@ def load_video_from_gcs(
 
     video_id = input[SIQDatasetColumns.VIDEO_ID]
 
-    with download_to_temp(bucket_name, video_blob_name(video_id, prefix)) as tmp_path:
-        if tmp_path is None:
-            input[SIQDatasetColumns.VIDEO_RAW] = None
-            return input
-
-        input["duration"] = get_duration(tmp_path)
-
-        ffmpeg_cmd = [
-            "ffmpeg", "-v", "error",
-            "-i", str(tmp_path),
-            "-movflags", "+frag_keyframe+empty_moov",
-            "-f", "mp4",
-        ]
-        if not with_audio:
-            ffmpeg_cmd += ["-map", "0:v:0", "-an"]
-        ffmpeg_cmd += ["-c", "copy", "pipe:1"]
-
-        result = subprocess.run(
-            ffmpeg_cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=True,
-        )
-
-    input[SIQDatasetColumns.VIDEO_RAW] = result.stdout
+    video = _load_video_from_gcs(video_id, bucket_name, prefix, with_audio)
+    input.update(**video)
     return input

@@ -118,7 +118,7 @@ Five models across **Google (Gemini)**, **OpenAI**, **Meta (Llama)**, and **Qwen
 <td align="left"><code>Gemma 4 31B</code></td>
 <td align="center"><code>video</code></td>
 <td align="right"><strong>66.83%</strong></td>
-<td align="right">—</td>
+<td align="right"><strong>63.65%</strong></td>
 </tr>
 <tr>
 <td align="left"><img src="assets/qwen.svg" width="22" height="22" alt="Qwen" valign="middle" /></td>
