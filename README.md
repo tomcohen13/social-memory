@@ -149,7 +149,7 @@ Five models across **Google (Gemini)**, **OpenAI**, **Meta (Llama)**, and **Qwen
 <td align="left"><code>gpt-4.1-nano</code></td>
 <td align="center"><code>text</code></td>
 <td align="right"><strong>58.31%</strong></td>
-<td align="right"><strong>49.10%</strong></td>
+<td align="right">—</td>
 <td align="right">—</td>
 </tr>
 <tr>
@@ -166,7 +166,8 @@ Five models across **Google (Gemini)**, **OpenAI**, **Meta (Llama)**, and **Qwen
 <td align="center"><code>video</code></td>
 <td align="right"><strong>-</strong></td>
 <td align="right"><strong>53.6%</strong></td>
-<td align="right">—</td>
+<td align="right"><strong>49.1%</strong></td>
+
 </tr>
 </tbody>
 </table>
