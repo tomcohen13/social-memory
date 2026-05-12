@@ -164,9 +164,8 @@ Five models across **Google (Gemini)**, **OpenAI**, **Meta (Llama)**, and **Qwen
 <td align="left"><img src="assets/xiaomi.svg" width="22" height="22" alt="NVIDIA" valign="middle" /></td>
 <td align="left"><code>Xiaomi MiMo V2.5</code></td>
 <td align="center"><code>video</code></td>
-<td align="right"><strong>-%</strong></td>
+<td align="right"><strong>-</strong></td>
 <td align="right"><strong>53.6%</strong></td>
-<td align="right">—</td>
 <td align="right">—</td>
 </tr>
 </tbody>
