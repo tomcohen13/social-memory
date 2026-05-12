@@ -67,8 +67,8 @@ Five models across **Google (Gemini)**, **OpenAI**, **Meta (Llama)**, and **Qwen
 <th align="left">Model</th>
 <th align="center">Modalities</th>
 <th align="right">1 min (original)</th>
-<th align="right">&lt; 5 min</th>
-<th align="right">&lt; 10 min</th>
+<th align="right">1-5 min</th>
+<th align="right"> 5-10 min</th>
 </tr>
 </thead>
 <tbody>
@@ -164,7 +164,7 @@ Five models across **Google (Gemini)**, **OpenAI**, **Meta (Llama)**, and **Qwen
 <td align="left"><img src="assets/xiaomi.svg" width="22" height="22" alt="NVIDIA" valign="middle" /></td>
 <td align="left"><code>Xiaomi MiMo V2.5</code></td>
 <td align="center"><code>video</code></td>
-<td align="right"><strong>-</strong></td>
+<td align="right"><strong>57.09%</strong></td>
 <td align="right"><strong>53.6%</strong></td>
 <td align="right"><strong>49.1%</strong></td>
 
