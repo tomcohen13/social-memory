@@ -20,7 +20,6 @@ from pathlib import Path
 import pandas as pd
 
 SEED = 42
-N_HARD = 2
 N_EASY = 4
 
 REPO_ROOT = Path(__file__).parent.parent
@@ -36,12 +35,10 @@ def main() -> None:
     df = pd.read_csv(DATA_DIR / "dataset.csv")
     df["chunk_ids"] = df["chunk_ids"].apply(ast.literal_eval)
 
-    # answer_idx is NaN for test-split questions — keep as-is, handle per row below
-
-    # Drop questions with <= 7 words —  893 questions
+    # Drop questions with <= 8 words —  1483 questions
     n_before = len(df)
-    df = df[df["q"].str.split().str.len() > 7].reset_index(drop=True)
-    print(f"Dropped {n_before - len(df):,} short questions (<= 7 words), {len(df):,} remaining")
+    df = df[df["q"].str.split().str.len() > 8].reset_index(drop=True)
+    print(f"Dropped {n_before - len(df):,} short questions (<= 8 words), {len(df):,} remaining")
 
     # Drop questions with timestamps (e.g. "at 0:25") - 173 questions
     n_before = len(df)
@@ -62,12 +59,8 @@ def main() -> None:
         oracle_idx = int(row["oracle_idx"])
         chunk_ids: list[int] = row["chunk_ids"]
 
-        # Positive
-        positive = chunk_path(vid, oracle_idx)
-
-        # Hard negatives: randomly sample
-        hard_pool = [c for c in chunk_ids if c != oracle_idx]
-        hard_neg_paths = [chunk_path(vid, c) for c in random.choices(hard_pool, k=N_HARD)]
+        # Hard negatives: all non-oracle chunks from the same video
+        hard_neg_paths = [chunk_path(vid, c) for c in chunk_ids if c != oracle_idx]
 
         # Easy negatives
         other_videos = [v for v in all_videos if v != vid]
@@ -85,7 +78,8 @@ def main() -> None:
             "options": options,
             "answer_idx": answer_idx,
             "answer": options[answer_idx] if answer_idx is not None else None,
-            "positive": positive,
+            "oracle_idx": oracle_idx,
+            "oracle_path": chunk_path(vid, oracle_idx),
             "hard_negatives": hard_neg_paths,
             "easy_negatives": easy_neg_paths,
         })
@@ -104,7 +98,7 @@ def main() -> None:
         writer.writerow(["qid", "vid_name", "question", "answer_idx", "chunk_path", "role"])
         for rec in records:
             base = [rec["qid"], rec["vid_name"], rec["question"], rec["answer_idx"]]
-            writer.writerow([*base, rec["positive"], "positive"])
+            writer.writerow([*base, rec["oracle_path"], "positive"])
             for path in rec["hard_negatives"]:
                 writer.writerow([*base, path, "hard_negative"])
             for path in rec["easy_negatives"]:
