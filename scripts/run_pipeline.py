@@ -58,6 +58,12 @@ parser.add_argument(
     type=str,
     help="Name of the experiment for output file name",
 )
+parser.add_argument(
+    "--run_id",
+    type=str,
+    required=False,
+    help="Run id if referencing a previous one",
+)
 
 args = parser.parse_args()
 
