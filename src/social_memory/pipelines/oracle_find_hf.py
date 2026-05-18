@@ -19,7 +19,8 @@ from social_memory.transforms import TransformList, apply_transform_with_concurr
 from social_memory.utils import check_device, load_dataset, group_inputs_by_video_id, read_vtt_file
 from social_memory.constants import GCS_BUCKET, GCS_CHUNKS_PREFIX
 from social_memory.gcs import list_blobs, download_to_temp
-from social_memory.encoders.xclip import sample_frames
+# from social_memory.encoders.xclip import sample_frames
+
 from social_memory.encoders.hf import HFVideoTextEncoder
 
 
@@ -59,22 +60,8 @@ class OracleFindPipeline(BasePipeline):
         Loads frames and transcripts per chunk
         """
 
-        chunks = defaultdict(dict)
-        video_id = input.get(SIQDatasetColumns.VIDEO_ID.value)
-
-        print("Downloading frames, transcripts")
-        blobs = list(list_blobs(GCS_BUCKET, GCS_CHUNKS_PREFIX + f"/{video_id}/"))
-        with ThreadPoolExecutor(max_workers=16) as ex:
-            futures = [ex.submit(partial(process_blob, num_frames=self.encoder.num_frames), b) for b in blobs]
-            for f in as_completed(futures):
-                result = f.result()
-                if result:
-                    chunk_idx, key, value = result
-                    chunks[chunk_idx][key] = value
-
-        assert len(chunks) == input["num_chunks"]
-        input["chunks"] = chunks
-        return input
+        from social_memory.transforms.video import load_chunks
+        return load_chunks(input, num_frames=self.encoder.num_frames)
 
     def encode_input(self, input: dict) -> dict:
         """
@@ -182,22 +169,6 @@ class OracleFindPipeline(BasePipeline):
 
         elapsed_time = (datetime.now() - start_time).total_seconds()
         self.logger.info(f"Finished processing {len(dataset)} documents in {elapsed_time:.1f}s.")
-
-
-def process_blob(blob, num_frames: int):
-    path = Path(blob.name)
-    chunk_idx = int(path.stem)
-    ext = path.suffix
-
-    if ext == ".mp4":
-        with download_to_temp(GCS_BUCKET, blob.name) as tmp_chunk_path:
-            frames = sample_frames(tmp_chunk_path, num_frames=num_frames)
-        return chunk_idx, "frames", frames
-    elif ext == ".vtt":
-        with download_to_temp(GCS_BUCKET, blob.name) as tmp_path:
-            transcript = read_vtt_file(tmp_path)
-        return chunk_idx, "transcript", transcript
-    return None
 
 
 # CONVERT THIS UGLY-ASS THING INTO PIPELINE
