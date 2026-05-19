@@ -75,13 +75,28 @@ class FeatureCachedDataset(Dataset):
             lines=True,
         ).reset_index(drop=True)
 
+        # Load every chunk .npz once into memory and reuse from __getitem__.
+        # Total memory is tiny (~8MB for 400 videos × 10 chunks × 512 dims),
+        # and we avoid re-opening the same file twice (validate + load).
+        self._chunk_cache: dict[str, dict[str, np.ndarray]] = {}
+
         def _ok(vid_name: str) -> bool:
             p = self.chunk_dir / f"{vid_name}.npz"
             if not p.exists():
                 return False
             with np.load(p) as f:
-                n = int(f["video_emb"].shape[0])
-            return 0 < n <= max_chunks_per_video
+                video_emb = np.asarray(f["video_emb"], dtype=np.float32)
+                transcript_emb = np.asarray(f["transcript_emb"], dtype=np.float32)
+                chunk_idx = np.asarray(f["chunk_idx"], dtype=np.int32)
+            n = int(video_emb.shape[0])
+            if not (0 < n <= max_chunks_per_video):
+                return False
+            self._chunk_cache[vid_name] = {
+                "video_emb": video_emb,
+                "transcript_emb": transcript_emb,
+                "chunk_idx": chunk_idx,
+            }
+            return True
 
         valid = df[SIQDatasetColumns.VIDEO_ID].apply(_ok)
         n_dropped = int((~valid).sum())
@@ -112,14 +127,12 @@ class FeatureCachedDataset(Dataset):
     def __getitem__(self, idx: int) -> dict | None:
         row = self.groups.iloc[idx]
         vid = row[SIQDatasetColumns.VIDEO_ID]
-        try:
-            with np.load(self.chunk_dir / f"{vid}.npz") as f:
-                video_emb = np.asarray(f["video_emb"], dtype=np.float32)
-                transcript_emb = np.asarray(f["transcript_emb"], dtype=np.float32)
-                chunk_idx = np.asarray(f["chunk_idx"], dtype=np.int32)
-        except Exception as e:
-            print(f"FeatureCachedDataset: skip {vid}: {type(e).__name__}: {e}")
+        cached = self._chunk_cache.get(vid)
+        if cached is None:
             return None
+        video_emb = cached["video_emb"]
+        transcript_emb = cached["transcript_emb"]
+        chunk_idx = cached["chunk_idx"]
 
         chunks = {
             int(ci): {

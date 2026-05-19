@@ -235,7 +235,7 @@ def train(
     temperature=0.07,
     ckpt_dir="checkpoints",
     ckpt_every=5,
-    log_every=1,  # log every step while diagnosing; bump back up later
+    log_every=20,
     compute_loss_fn=None,
     log_callback=None,
     post_save_callback=None,
@@ -274,8 +274,13 @@ def train(
 
         for step, batch in enumerate(dataloader):
             t_dataload = time.perf_counter() - t_step_end
-            print(f"[main] step {step} START at {time.strftime('%H:%M:%S')} | got {len(batch['vid_name'])} videos: {batch['vid_name']}", flush=True)
-
+            verbose = step % log_every == 0
+            if verbose:
+                print(
+                    f"[main] step {step} START at {time.strftime('%H:%M:%S')} | "
+                    f"got {len(batch['vid_name'])} videos: {batch['vid_name']}",
+                    flush=True,
+                )
 
             if not batch.get("vid_name"):
                 t_step_end = time.perf_counter()
@@ -283,14 +288,12 @@ def train(
 
             timings = {}
 
-            print(f"[main] step {step} calling compute_loss_fn", flush=True)
             with timer("forward", timings):
                 loss = compute_loss_fn(model, batch, temperature, timings)
 
             if loss is None:
                 t_step_end = time.perf_counter()
                 continue
-            print(f"[main] step {step} compute_batch_loss done in {time.perf_counter() - t_dataload:.2f}s, loss={loss}", flush=True)
 
             with timer("backward", timings):
                 optimizer.zero_grad()

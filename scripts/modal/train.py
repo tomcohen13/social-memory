@@ -59,6 +59,7 @@ app = modal.App("social-memory-train", image=IMAGE)
 
 @app.function(
     gpu="A10G",
+    cpu=4.0,
     volumes={FEATURES_DIR: FEATURES_VOL},
     timeout=6 * 3600,
 )
@@ -73,6 +74,7 @@ def precompute_features(
     skip_text: bool = False,
     skip_chunks: bool = False,
     max_chunks_per_video: int = 24,
+    num_workers: int = 4,
 ) -> None:
     """Thin wrapper: bootstrap GCS creds, build encoder, call shared driver."""
     if splits is None:
@@ -108,6 +110,7 @@ def precompute_features(
         skip_text=skip_text,
         skip_chunks=skip_chunks,
         max_chunks_per_video=max_chunks_per_video,
+        num_workers=num_workers,
         commit_callback=FEATURES_VOL.commit,
     )
 
@@ -127,7 +130,7 @@ def train(
     temperature: float = 0.07,
     hidden_dim: int = 512,
     output_dim: int = 256,
-    num_workers: int = 2,
+    num_workers: int = 4,
     max_chunks_per_video: int = 24,
     ckpt_every: int = 5,
     wandb_project: str = "social-memory",
@@ -190,7 +193,7 @@ def main(
     temperature: float = 0.07,
     hidden_dim: int = 512,
     output_dim: int = 256,
-    num_workers: int = 2,
+    num_workers: int = 4,
     max_chunks_per_video: int = 24,
     ckpt_every: int = 5,
     wandb_project: str = "social-memory",
@@ -214,6 +217,7 @@ def main(
             skip_text=skip_text,
             skip_chunks=skip_chunks,
             max_chunks_per_video=max_chunks_per_video,
+            num_workers=num_workers,
         )
         print(f"spawned precompute (function call id: {call.object_id})")
         print("track with:  modal app logs <app-id>   (see Modal UI for app id)")
