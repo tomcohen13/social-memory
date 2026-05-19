@@ -167,3 +167,100 @@ def _to_np1d(x) -> np.ndarray:
     if x.ndim != 1:
         raise ValueError(f"expected 1D embedding, got shape {x.shape}")
     return x
+
+
+def precompute_features_run(
+    encoder,
+    out_root,
+    split_dfs: dict,
+    *,
+    limit_videos: int | None = None,
+    skip_text: bool = False,
+    skip_chunks: bool = False,
+    max_chunks_per_video: int = 24,
+    commit_callback=None,
+    commit_every: int = 25,
+) -> None:
+    """Driver: encode every video chunk + per-split QA text, write `.npz`s.
+
+    Shared by the local CLI and the Modal `precompute_features` wrapper so
+    both code paths execute the same logic. The Modal wrapper passes
+    `commit_callback=features_vol.commit` so intermediate cache writes
+    become durable mid-run.
+
+    Args:
+        encoder: an `XCLIPEncoder` (or any `FrozenEncoder`) already on GPU.
+        out_root: dir to write `chunks/<vid>.npz` and `text/<split>.npz`.
+        split_dfs: `{split_name: qa_dataframe}` — same shape that
+            `load_qa_dataset(SIQ2LONG, split)` returns.
+        commit_callback: invoked every `commit_every` chunked videos and
+            once after text encoding. Modal volume commit hook.
+    """
+    from pathlib import Path
+
+    out_root = Path(out_root)
+    chunk_dir = out_root / "chunks"
+    text_dir = out_root / "text"
+
+    all_videos = sorted(
+        {v for df in split_dfs.values() for v in df["vid_name"].unique().tolist()}
+    )
+    if limit_videos:
+        all_videos = all_videos[:limit_videos]
+    print(
+        f"target: {len(all_videos)} videos across splits "
+        f"{list(split_dfs)}"
+    )
+
+    if not skip_chunks:
+        chunk_dir.mkdir(parents=True, exist_ok=True)
+        for i, vid_name in enumerate(all_videos):
+            try:
+                chunks = list_chunks_for_video(vid_name)
+            except Exception as e:
+                print(f"  [{i+1}/{len(all_videos)}] [error] list {vid_name}: {e}")
+                continue
+            if not chunks:
+                print(f"  [{i+1}/{len(all_videos)}] [warn] no chunks for {vid_name}")
+                continue
+            if len(chunks) > max_chunks_per_video:
+                print(
+                    f"  [{i+1}/{len(all_videos)}] [skip] {vid_name}: "
+                    f"{len(chunks)} chunks > max {max_chunks_per_video}"
+                )
+                continue
+            if chunk_features_exist(chunk_dir, vid_name, len(chunks)):
+                print(f"  [{i+1}/{len(all_videos)}] [skip] {vid_name} cached")
+                continue
+            try:
+                arrays = encode_video_chunks(encoder, vid_name, chunks=chunks)
+            except Exception as e:
+                print(f"  [{i+1}/{len(all_videos)}] [error] encode {vid_name}: {e}")
+                continue
+            path = save_chunk_features(chunk_dir, vid_name, arrays)
+            print(
+                f"  [{i+1}/{len(all_videos)}] [done] {vid_name} → {path.name} "
+                f"({arrays['video_emb'].shape[0]} chunks, dim={arrays['video_emb'].shape[1]})"
+            )
+            if commit_callback is not None and (i + 1) % commit_every == 0:
+                commit_callback()
+
+    if not skip_text:
+        text_dir.mkdir(parents=True, exist_ok=True)
+        for split, df in split_dfs.items():
+            target = text_dir / f"{split}.npz"
+            if target.exists():
+                with np.load(target, allow_pickle=True) as f:
+                    if len(f["qids"]) == len(df):
+                        print(f"  [skip] text/{split}.npz")
+                        continue
+            arrays = encode_text_for_split(encoder, df)
+            np.savez(target, **arrays)
+            print(
+                f"  [done] text/{split}.npz "
+                f"({len(arrays['qids'])} rows, dim={arrays['q_emb'].shape[1]})"
+            )
+
+    if commit_callback is not None:
+        commit_callback()
+    print("precompute complete")
