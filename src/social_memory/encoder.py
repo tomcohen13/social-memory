@@ -44,8 +44,8 @@ class XCLIPEncoder(torch.nn.Module):
             attention_mask=text_inputs["attention_mask"],
         )
         video_out = self.model.get_video_features(pixel_values=video_inputs["pixel_values"])
-        text_emb = F.normalize(text_out.pooler_output, dim=-1)
-        video_emb = F.normalize(video_out.pooler_output, dim=-1)
+        text_emb = F.normalize(text_out, dim=-1)
+        video_emb = F.normalize(video_out, dim=-1)
         fused_mean = F.normalize((text_emb + video_emb) / 2, dim=-1)
 
         return {
@@ -67,7 +67,7 @@ class XCLIPEncoder(torch.nn.Module):
             input_ids=text_inputs["input_ids"],
             attention_mask=text_inputs["attention_mask"],
         )
-        text_emb = F.normalize(text_out.pooler_output, dim=-1)
+        text_emb = F.normalize(text_out, dim=-1)
         return text_emb
 
 
