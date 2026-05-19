@@ -169,6 +169,109 @@ def _to_np1d(x) -> np.ndarray:
     return x
 
 
+class _ChunkIODataset:
+    """Per-chunk download + decode worker, fronted by `torch.utils.data.DataLoader`.
+
+    Each `__getitem__` blocks on a GCS download + an av decode — i.e. the
+    expensive I/O for ONE chunk. Wrapping these in a DataLoader with
+    `num_workers > 0` parallelises both across worker processes and prefetches
+    the next chunk while the encoder forward runs on the GPU. Encoder forward
+    stays in the main process (so we don't ship the X-CLIP weights to each
+    worker).
+
+    Yields `None` for chunks where the mp4 download fails so the caller can
+    skip them without crashing the batch.
+    """
+
+    def __init__(
+        self,
+        chunks: list[tuple[int, str, str | None]],
+        num_frames: int,
+    ):
+        self.chunks = chunks
+        self.num_frames = num_frames
+
+    def __len__(self) -> int:
+        return len(self.chunks)
+
+    def __getitem__(self, idx: int):
+        chunk_idx, mp4_blob, vtt_blob = self.chunks[idx]
+        transcript = ""
+        if vtt_blob is not None:
+            with download_to_temp(GCS_BUCKET, vtt_blob) as vtt_path:
+                if vtt_path is not None:
+                    transcript = read_vtt_file(vtt_path).strip()
+
+        with download_to_temp(GCS_BUCKET, mp4_blob) as mp4_path:
+            if mp4_path is None:
+                return None
+            frames = sample_frames(mp4_path, num_frames=self.num_frames)
+
+        # BERT tokenises "" to just [CLS][SEP]; pass a space to be defensive
+        # while still being able to flag has_transcript=False downstream.
+        return {
+            "chunk_idx": int(chunk_idx),
+            "frames": frames,
+            "transcript": transcript if transcript else " ",
+            "has_transcript": bool(transcript),
+        }
+
+
+def _chunk_io_collate(batch: list[dict | None]) -> list[dict]:
+    """Filter out failed chunks (None) — caller iterates the survivors."""
+    return [b for b in batch if b is not None]
+
+
+def encode_video_chunks_parallel(
+    encoder: FrozenEncoder,
+    vid_name: str,
+    chunks: list[tuple[int, str, str | None]],
+    num_workers: int = 4,
+) -> dict[str, np.ndarray]:
+    """Same contract as `encode_video_chunks`, but downloads+decodes in
+    parallel worker processes via DataLoader. Encoder forward stays per-chunk
+    in the main process — batching the forward is a follow-up.
+    """
+    from torch.utils.data import DataLoader
+
+    ds = _ChunkIODataset(chunks, num_frames=encoder.num_frames)
+    loader = DataLoader(
+        ds,
+        batch_size=1,
+        shuffle=False,
+        num_workers=num_workers,
+        collate_fn=_chunk_io_collate,
+        # Workers persist across the whole video — avoids fork overhead per chunk.
+        persistent_workers=num_workers > 0,
+    )
+
+    video_embs: list[np.ndarray] = []
+    txt_embs: list[np.ndarray] = []
+    has_t: list[bool] = []
+    idxs: list[int] = []
+
+    for batch in loader:
+        for item in batch:
+            out = encoder(item["frames"], item["transcript"])
+            video_embs.append(_to_np1d(out["video_embeddings"]))
+            txt_embs.append(_to_np1d(out["text_embeddings"]))
+            has_t.append(item["has_transcript"])
+            idxs.append(item["chunk_idx"])
+
+    if not video_embs:
+        raise ValueError(f"no chunks survived download/decode for {vid_name}")
+
+    # DataLoader doesn't guarantee FIFO across workers; sort by chunk_idx so
+    # the on-disk .npz is deterministic.
+    order = sorted(range(len(idxs)), key=lambda i: idxs[i])
+    return {
+        "video_emb": np.stack([video_embs[i] for i in order]).astype(np.float32),
+        "transcript_emb": np.stack([txt_embs[i] for i in order]).astype(np.float32),
+        "has_transcript": np.asarray([has_t[i] for i in order], dtype=bool),
+        "chunk_idx": np.asarray([idxs[i] for i in order], dtype=np.int32),
+    }
+
+
 def precompute_features_run(
     encoder,
     out_root,
@@ -178,6 +281,7 @@ def precompute_features_run(
     skip_text: bool = False,
     skip_chunks: bool = False,
     max_chunks_per_video: int = 24,
+    num_workers: int = 4,
     commit_callback=None,
     commit_every: int = 25,
 ) -> None:
@@ -233,7 +337,9 @@ def precompute_features_run(
                 print(f"  [{i+1}/{len(all_videos)}] [skip] {vid_name} cached")
                 continue
             try:
-                arrays = encode_video_chunks(encoder, vid_name, chunks=chunks)
+                arrays = encode_video_chunks_parallel(
+                    encoder, vid_name, chunks=chunks, num_workers=num_workers
+                )
             except Exception as e:
                 print(f"  [{i+1}/{len(all_videos)}] [error] encode {vid_name}: {e}")
                 continue

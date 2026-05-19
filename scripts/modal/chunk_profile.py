@@ -36,6 +36,7 @@ app = modal.App("social-memory-profile", image=IMAGE)
 
 @app.function(
     gpu="A10G",
+    cpu=4.0,
     volumes={FEATURES_DIR: FEATURES_VOL},
     timeout=600,
 )
