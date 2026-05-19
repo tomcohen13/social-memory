@@ -56,6 +56,10 @@ IMAGE = (
     )
     .add_local_dir(str(SRC_DIR), remote_path="/root/social_memory")
     .add_local_dir(str(DATA_DIR), remote_path="/root/datasets/siq2long")
+    # Sibling helper module — Modal v1 no longer auto-mounts source files
+    # next to the entrypoint, so the wrapper scripts' `from _helpers import …`
+    # would fail inside the container without this.
+    .add_local_file(str(Path(__file__)), remote_path="/root/_helpers.py")
 )
 
 FEATURES_VOL = modal.Volume.from_name("social-memory-features", create_if_missing=True)
