@@ -1,15 +1,19 @@
 """Video transforms"""
+import av
+import av.logging
+av.logging.set_level(av.logging.ERROR)
+
 import base64
+import glob
+import numpy as np
+import subprocess
+import os
+
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import partial
-import subprocess
 from pathlib import Path
 from typing import List, Tuple
-
-import av
-import numpy as np
-import torch
 
 from social_memory.constants import (
     GCS_BUCKET,
@@ -206,27 +210,47 @@ def _load_video_from_gcs(
 
 
 def load_chunks(input: dict, num_frames: int) -> dict:
-        """
-        Loads frames and transcripts per chunk
-        """
+    """
+    Loads frames and transcripts per chunk
+    """
 
-        chunks = defaultdict(dict)
-        video_id = input.get(SIQDatasetColumns.VIDEO_ID.value)
+    chunks = defaultdict(dict)
+    video_id = input.get(SIQDatasetColumns.VIDEO_ID.value)
 
-        # print("Downloading frames, transcripts")
-        blobs = list(list_blobs(GCS_BUCKET, GCS_CHUNKS_PREFIX + f"/{video_id}/"))
-        with ThreadPoolExecutor(max_workers=16) as ex:
-            futures = [ex.submit(partial(process_blob, num_frames=num_frames), b) for b in blobs]
-            for f in as_completed(futures):
-                result = f.result()
-                if result:
-                    chunk_idx, key, value = result
-                    chunks[chunk_idx][key] = value
-                    chunks[chunk_idx]["chunk_idx"] = chunk_idx
-
-        # assert len(chunks) == input["num_chunks"]
+    local_dir = f"../chunks/{video_id}/"
+    if os.path.exists(local_dir):
+        for path in glob.glob(f"{local_dir}*"):
+            chunk_idx, result = process_file(path, num_frames=num_frames)
+            chunks[chunk_idx].update(result)
         input["chunks"] = chunks
         return input
+    
+    print("loading from GCS...")
+    blobs = list(list_blobs(GCS_BUCKET, GCS_CHUNKS_PREFIX + f"/{video_id}/"))
+    with ThreadPoolExecutor(max_workers=16) as ex:
+        futures = [ex.submit(partial(process_blob, num_frames=num_frames), b) for b in blobs]
+        for f in as_completed(futures):
+            result = f.result()
+            if result:
+                chunk_idx, key, value = result
+                chunks[chunk_idx][key] = value
+                chunks[chunk_idx]["chunk_idx"] = chunk_idx
+
+    # assert len(chunks) == input["num_chunks"]
+    input["chunks"] = chunks
+    return input
+
+
+def process_file(path_to_file, num_frames):
+    path = Path(path_to_file)
+    ext = path.suffix
+    chunk_idx = int(path.stem)
+    result = {"chunk_idx": chunk_idx}
+    if ext == ".mp4":
+        result["frames"] = sample_frames(path_to_file, num_frames=num_frames)
+    elif ext == ".vtt":
+        result["transcript"] = read_vtt_file(path_to_file)
+    return chunk_idx, result
 
 
 def process_blob(blob, num_frames: int):
@@ -245,60 +269,31 @@ def process_blob(blob, num_frames: int):
     return None
 
 
-
-def _decoded_frame_count(video_path: Path) -> int:
-    with av.open(str(video_path)) as container:
-        return sum(1 for _ in container.decode(video=0))
-
-
-def _stream_total_frames(stream: av.video.stream.VideoStream, video_path: Path) -> int:
-    if stream.frames and stream.frames > 0:
-        return int(stream.frames)
-    duration_s: float | None = None
-    if stream.duration is not None and stream.time_base is not None:
-        duration_s = float(stream.duration * stream.time_base)
-    if duration_s is not None and stream.average_rate is not None:
-        est = int(duration_s * float(stream.average_rate))
-        if est > 0:
-            return est
-    return _decoded_frame_count(video_path)
-
-
 def sample_frames(video_path: Path, num_frames: int) -> list[np.ndarray]:
-    """
-    Decode `num_frames` evenly-spaced RGB frames from an mp4 as HWC uint8 arrays.
-
-    Uses container metadata when reliable; otherwise counts by decoding once.
-    If the stream ends before enough frames are collected (bad metadata), pads
-    by repeating the last decoded frame so the list length is always `num_frames`.
-    """
     with av.open(str(video_path)) as container:
         stream = container.streams.video[0]
-        total = _stream_total_frames(stream, video_path)
+        stream.thread_type = "AUTO"
+        time_base = stream.time_base
+        duration = float(stream.duration * time_base) if stream.duration else None
 
-    if total <= 0:
-        raise ValueError(f"No decodable video frames in {video_path}")
+        if duration is None or duration <= 0:
+            raise ValueError(f"No duration info in {video_path}")
 
-    targets = np.linspace(0, total - 1, num_frames, dtype=int).tolist()
-    want = Counter(targets)
-    frames: list[np.ndarray] = []
+        target_times = np.linspace(0, duration, num_frames, endpoint=False)
+        frames = []
 
-    with av.open(str(video_path)) as container:
-        for i, frame in enumerate(container.decode(video=0)):
-            k = want.get(i, 0)
-            if k:
-                arr = frame.to_ndarray(format="rgb24")
-                for _ in range(k):
-                    frames.append(arr)
-                    if len(frames) == num_frames:
-                        return frames
+        for t in target_times:
+            container.seek(int(t / time_base), stream=stream, any_frame=False, backward=True)
+            for frame in container.decode(video=0):
+                if float(frame.pts * time_base) >= t:
+                    frames.append(frame.to_ndarray(format="rgb24"))
+                    break
 
-    if len(frames) < num_frames:
-        if not frames:
-            raise ValueError(f"No frames decoded from {video_path} (metadata total={total})")
-        pad = frames[-1]
-        frames.extend([pad] * (num_frames - len(frames)))
-    return frames
+        if len(frames) < num_frames:
+            if not frames:
+                raise ValueError(f"No frames decoded from {video_path}")
+            frames.extend([frames[-1]] * (num_frames - len(frames)))
+        return frames
 
 
 def load_video_from_gcs(
