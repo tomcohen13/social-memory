@@ -234,10 +234,11 @@ def train(
     num_epochs=3,
     temperature=0.07,
     ckpt_dir="checkpoints",
-    keep_last_n=3,
+    ckpt_every=5,
     log_every=1,  # log every step while diagnosing; bump back up later
     compute_loss_fn=None,
     log_callback=None,
+    post_save_callback=None,
 ):
     if compute_loss_fn is None:
         compute_loss_fn = compute_batch_loss
@@ -247,7 +248,14 @@ def train(
     step_losses = []
     best_epoch_loss = float("inf")
     global_step = 0
-    recent_ckpts = []
+    keep_last_n = 5
+    recent_ckpts: list[tuple[int, "Path"]] = []  # (epoch, path) sliding window
+
+    def _save(state, name):
+        path = save_checkpoint(state, ckpt_dir, name)
+        if post_save_callback is not None:
+            post_save_callback()
+        return path
 
     # GPU info up front
     if torch.cuda.is_available():
@@ -267,7 +275,7 @@ def train(
         for step, batch in enumerate(dataloader):
             t_dataload = time.perf_counter() - t_step_end
             print(f"[main] step {step} START at {time.strftime('%H:%M:%S')} | got {len(batch['vid_name'])} videos: {batch['vid_name']}", flush=True)
-    
+
 
             if not batch.get("vid_name"):
                 t_step_end = time.perf_counter()
@@ -382,17 +390,145 @@ def train(
             "temperature": temperature,
         }
 
-        last_path = save_checkpoint(state, ckpt_dir, f"epoch_{epoch:04d}")
-        recent_ckpts.append(last_path)
+        # Save every epoch, but only delete non-milestone snapshots that fall
+        # out of the last-N window. Milestones (every `ckpt_every` epochs) are
+        # preserved permanently.
+        last_path = _save(state, f"epoch_{epoch:04d}")
+        recent_ckpts.append((epoch, last_path))
         while len(recent_ckpts) > keep_last_n:
-            old = recent_ckpts.pop(0)
-            old.unlink(missing_ok=True)
+            old_epoch, old_path = recent_ckpts.pop(0)
+            is_milestone = (old_epoch + 1) % ckpt_every == 0
+            if not is_milestone:
+                old_path.unlink(missing_ok=True)
 
-        save_checkpoint(state, ckpt_dir, "latest")
+        _save(state, "latest")
 
         if avg_loss < best_epoch_loss:
             best_epoch_loss = avg_loss
-            save_checkpoint(state, ckpt_dir, "best")
+            _save(state, "best")
             print(f"new best avg loss: {avg_loss:.4f}")
 
     return step_losses
+
+
+def train_features_run(
+    features_root,
+    ckpt_dir,
+    *,
+    split: str = "train",
+    epochs: int = 3,
+    batch_size: int = 4,
+    lr: float = 1e-4,
+    temperature: float = 0.07,
+    hidden_dim: int = 512,
+    output_dim: int = 256,
+    num_workers: int = 2,
+    max_chunks_per_video: int = 24,
+    ckpt_every: int = 5,
+    wandb_config: dict | None = None,
+    post_save_callback=None,
+):
+    """Shared driver: feature-cached dataset → adapter → train loop.
+
+    Used by both the local CLI and the Modal entrypoint so they execute the
+    same code path. Hyperparameters and IO roots come in as args; nothing
+    about Modal or the local filesystem layout leaks into here.
+
+    Args:
+        features_root: dir containing `chunks/<vid>.npz` and `text/<split>.npz`.
+        ckpt_dir: where to write `epoch_XXXX.pt`, `latest.pt`, `best.pt`.
+        wandb_config: optional dict with keys `api_key`, `project`, `entity`,
+            `run_name`, `extra_config`. Pass None to disable wandb.
+        post_save_callback: invoked after every checkpoint write — Modal
+            passes `ckpt_vol.commit` so intermediate checkpoints become
+            durable in the volume mid-run.
+    """
+    from torch.utils.data import DataLoader
+
+    from social_memory.feature_dataset import (
+        FeatureCachedDataset,
+        XCLIPFeatureAdapter,
+        feature_collate_fn,
+    )
+
+    features_root = Path(features_root)
+    if not (features_root / "chunks").exists():
+        raise FileNotFoundError(
+            f"no precomputed chunks at {features_root}/chunks — run precompute first"
+        )
+
+    dataset = FeatureCachedDataset(
+        split=split,
+        features_root=features_root,
+        max_chunks_per_video=max_chunks_per_video,
+    )
+    print(f"dataset: {len(dataset)} videos | feat_dim={dataset.dim}")
+
+    dataloader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        collate_fn=feature_collate_fn,
+        pin_memory=True,
+    )
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model = XCLIPFeatureAdapter(
+        feat_dim=dataset.dim,
+        hidden_dim=hidden_dim,
+        output_dim=output_dim,
+    ).to(device)
+    n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"adapter on {device} | trainable params: {n_trainable:,}")
+
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+
+    log_callback = None
+    wandb_run = None
+    if wandb_config and wandb_config.get("api_key"):
+        os.environ["WANDB_API_KEY"] = wandb_config["api_key"]
+        import wandb
+
+        wandb_run = wandb.init(
+            project=wandb_config.get("project", "social-memory"),
+            entity=wandb_config.get("entity"),
+            name=wandb_config.get("run_name"),
+            config={
+                "split": split,
+                "epochs": epochs,
+                "batch_size": batch_size,
+                "lr": lr,
+                "temperature": temperature,
+                "hidden_dim": hidden_dim,
+                "output_dim": output_dim,
+                "feat_dim": dataset.dim,
+                "n_trainable": n_trainable,
+                "max_chunks_per_video": max_chunks_per_video,
+                "ckpt_every": ckpt_every,
+                "dataset_size": len(dataset),
+                **(wandb_config.get("extra_config") or {}),
+            },
+        )
+        log_callback = wandb.log
+    elif wandb_config:
+        print("WARN: wandb_config given but no api_key — skipping wandb logging")
+
+    try:
+        train(
+            model,
+            dataloader,
+            optimizer,
+            num_epochs=epochs,
+            temperature=temperature,
+            ckpt_dir=str(ckpt_dir),
+            ckpt_every=ckpt_every,
+            compute_loss_fn=compute_batch_loss_features,
+            log_callback=log_callback,
+            post_save_callback=post_save_callback,
+        )
+    finally:
+        if wandb_run is not None:
+            import wandb
+
+            wandb.finish()
