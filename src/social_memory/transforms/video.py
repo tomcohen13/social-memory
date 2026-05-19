@@ -5,6 +5,7 @@ av.logging.set_level(av.logging.ERROR)
 
 import base64
 import glob
+import io
 import numpy as np
 import subprocess
 import os
@@ -23,8 +24,8 @@ from social_memory.constants import (
     SIQDatasetColumns,
     DirPaths,
 )
-from social_memory.gcs import download_to_temp, list_blobs, video_blob_name
-from social_memory.utils import get_duration, read_vtt_file
+from social_memory.gcs import download_to_memory, download_to_temp, list_blobs, video_blob_name
+from social_memory.utils import get_duration, read_vtt_buffer, read_vtt_file
 
 
 def _compute_clip_window(
@@ -217,17 +218,27 @@ def load_chunks(input: dict, num_frames: int) -> dict:
     chunks = defaultdict(dict)
     video_id = input.get(SIQDatasetColumns.VIDEO_ID.value)
 
+    # When running inside a DataLoader worker, processes already provide video-level parallelism.
+    # Each worker only loads one video at a time, so a small thread pool suffices.
+    # In the main process (num_workers=0) we want more threads since there's no process parallelism.
+    from torch.utils.data import get_worker_info
+    in_worker = get_worker_info() is not None
+    inner_workers = 2 if in_worker else 8
+
     local_dir = f"../chunks/{video_id}/"
     if os.path.exists(local_dir):
-        for path in glob.glob(f"{local_dir}*"):
-            chunk_idx, result = process_file(path, num_frames=num_frames)
-            chunks[chunk_idx].update(result)
+        paths = glob.glob(f"{local_dir}*")
+        with ThreadPoolExecutor(max_workers=min(len(paths), inner_workers)) as ex:
+            futures = [ex.submit(partial(process_file, num_frames=num_frames), p) for p in paths]
+            for f in as_completed(futures):
+                chunk_idx, result = f.result()
+                chunks[chunk_idx].update(result)
         input["chunks"] = chunks
         return input
-    
+
     print("loading from GCS...")
     blobs = list(list_blobs(GCS_BUCKET, GCS_CHUNKS_PREFIX + f"/{video_id}/"))
-    with ThreadPoolExecutor(max_workers=16) as ex:
+    with ThreadPoolExecutor(max_workers=inner_workers) as ex:
         futures = [ex.submit(partial(process_blob, num_frames=num_frames), b) for b in blobs]
         for f in as_completed(futures):
             result = f.result()
@@ -258,26 +269,29 @@ def process_blob(blob, num_frames: int):
     chunk_idx = int(path.stem)
     ext = path.suffix
 
+    data = download_to_memory(GCS_BUCKET, blob.name)
+    if data is None:
+        return None
+
     if ext == ".mp4":
-        with download_to_temp(GCS_BUCKET, blob.name) as tmp_chunk_path:
-            frames = sample_frames(tmp_chunk_path, num_frames=num_frames)
+        frames = sample_frames(io.BytesIO(data), num_frames=num_frames)
         return chunk_idx, "frames", frames
     elif ext == ".vtt":
-        with download_to_temp(GCS_BUCKET, blob.name) as tmp_path:
-            transcript = read_vtt_file(tmp_path)
+        transcript = read_vtt_buffer(io.StringIO(data.decode("utf-8")))
         return chunk_idx, "transcript", transcript
     return None
 
 
-def sample_frames(video_path: Path, num_frames: int) -> list[np.ndarray]:
-    with av.open(str(video_path)) as container:
+def sample_frames(video_source: Path | io.BytesIO, num_frames: int, target_size: int = 224) -> list[np.ndarray]:
+    src = video_source if isinstance(video_source, io.BytesIO) else str(video_source)
+    with av.open(src) as container:
         stream = container.streams.video[0]
         stream.thread_type = "AUTO"
         time_base = stream.time_base
         duration = float(stream.duration * time_base) if stream.duration else None
 
         if duration is None or duration <= 0:
-            raise ValueError(f"No duration info in {video_path}")
+            raise ValueError(f"No duration info in {video_source}")
 
         target_times = np.linspace(0, duration, num_frames, endpoint=False)
         frames = []
@@ -286,12 +300,15 @@ def sample_frames(video_path: Path, num_frames: int) -> list[np.ndarray]:
             container.seek(int(t / time_base), stream=stream, any_frame=False, backward=True)
             for frame in container.decode(video=0):
                 if float(frame.pts * time_base) >= t:
-                    frames.append(frame.to_ndarray(format="rgb24"))
+                    # Resize with libswscale immediately — keeps worker RAM O(num_frames * target_size^2)
+                    # instead of O(num_frames * native_resolution), which can be 30-50× larger.
+                    resized = frame.reformat(width=target_size, height=target_size, format="rgb24")
+                    frames.append(resized.to_ndarray())
                     break
 
         if len(frames) < num_frames:
             if not frames:
-                raise ValueError(f"No frames decoded from {video_path}")
+                raise ValueError(f"No frames decoded from {video_source}")
             frames.extend([frames[-1]] * (num_frames - len(frames)))
         return frames
 

@@ -37,19 +37,19 @@ class XCLIPAdapter(nn.Module):
         frames_list: list[list[np.ndarray]],
         transcripts: list[str],
     ) -> torch.Tensor:
-        """Encode a list of chunks (one per video). Returns (n_chunks, output_dim)."""
-        embs = []
-        for frames, transcript in zip(frames_list, transcripts):
-            out = self.backbone(frames=frames, transcript=transcript)
-            fused = (out["video_embeddings"] + out["text_embeddings"]) / 2   # (1, D)
-            embs.append(fused)
-        x = torch.cat(embs, dim=0)              # (n_chunks, D) — no grad through backbone
-        x = self.chunk_adapter(x)               # gradients flow here
+        """Encode a list of chunks. Returns (n_chunks, output_dim).
+
+        Two backbone passes for all chunks instead of 2*N — one batched video call
+        and one batched text call.
+        """
+        video_embs = self.backbone.encode_video(frames_list)    # (n_chunks, D) — no grad
+        text_embs = self.backbone.encode_text(transcripts)      # (n_chunks, D) — no grad
+        x = (video_embs + text_embs) / 2
+        x = self.chunk_adapter(x)                               # gradients flow here
         return F.normalize(x, dim=-1)
 
     def encode_questions(self, questions: list[str]) -> torch.Tensor:
         """Encode a list of question strings. Returns (n_questions, output_dim)."""
-        embs = [self.backbone.encode_text(q) for q in questions]
-        x = torch.cat(embs, dim=0)              # (n_q, D) — no grad through backbone
-        x = self.question_adapter(x)            # gradients flow here
+        x = self.backbone.encode_text(questions)    # single batched call — no grad
+        x = self.question_adapter(x)                # gradients flow here
         return F.normalize(x, dim=-1)

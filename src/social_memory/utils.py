@@ -42,9 +42,9 @@ def load_qa_dataset(dataset: str, split: str) -> pd.DataFrame:
     return qa
 
 
-def read_vtt_file(vtt_path: Path) -> str:
+def _parse_vtt_captions(captions_iter) -> str:
     captions = []
-    for caption in webvtt.read(str(vtt_path)):
+    for caption in captions_iter:
         for subcaption in caption.text.split("\n"):
             if captions == []:
                 captions.append(subcaption.strip())
@@ -52,8 +52,16 @@ def read_vtt_file(vtt_path: Path) -> str:
                 captions[-1] = subcaption.strip()
             else:
                 captions.append(subcaption.strip())
-
     return "\n".join(captions)
+
+
+def read_vtt_file(vtt_path: Path) -> str:
+    return _parse_vtt_captions(webvtt.read(str(vtt_path)))
+
+
+def read_vtt_buffer(buffer) -> str:
+    """Parse a VTT file from a file-like object (e.g. io.StringIO)."""
+    return _parse_vtt_captions(webvtt.read_buffer(buffer))
 
 
 def group_inputs_by_video_id(inputs: List[dict]) -> List[dict]:

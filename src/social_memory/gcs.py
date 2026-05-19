@@ -7,10 +7,15 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Generator, Iterator, Optional
 
+_gcs_client = None
+
 
 def _client():
-    from google.cloud import storage
-    return storage.Client()
+    global _gcs_client
+    if _gcs_client is None:
+        from google.cloud import storage
+        _gcs_client = storage.Client()
+    return _gcs_client
 
 
 def default_bucket() -> str:
@@ -35,9 +40,22 @@ def get_blob_from_path(bucket_name, path):
 
 
 def list_blobs(bucket, prefix) -> Iterator[Any]:
-    from google.cloud import storage
-    client = storage.Client()
-    return client.bucket(bucket).list_blobs(prefix=prefix)
+    return _client().bucket(bucket).list_blobs(prefix=prefix)
+
+
+def download_to_memory(bucket_name: str, name: str) -> Optional[bytes]:
+    """
+    Download a GCS blob into memory and return the raw bytes.
+
+    Returns None if the blob does not exist. Prefer this over download_to_temp
+    when the caller can work with bytes or a BytesIO directly — it skips the
+    disk write + read round-trip entirely.
+    """
+    from google.cloud.exceptions import NotFound
+    try:
+        return _client().bucket(bucket_name).blob(name).download_as_bytes()
+    except NotFound:
+        return None
 
 
 @contextmanager
@@ -48,23 +66,18 @@ def download_to_temp(bucket_name: str, name: str) -> Generator[Optional[Path], N
     Yields None if the blob does not exist. The temp file is deleted on exit
     regardless of whether an exception occurred.
 
-    Usage:
-        with download_to_temp(bucket, blob_name) as path:
-            if path is None:
-                ...  # blob not found
-            else:
-                ...  # use path
+    Prefer download_to_memory when the caller supports bytes or file-like objects.
     """
-    bucket = _client().bucket(bucket_name)
-    blob = bucket.blob(name)
-    if not blob.exists():
-        yield None
-        return
-
-    fd, tmp_path = tempfile.mkstemp(suffix=".mp4")
+    from google.cloud.exceptions import NotFound
+    fd, tmp_path = tempfile.mkstemp(suffix=Path(name).suffix)
     os.close(fd)
     try:
-        blob.download_to_filename(tmp_path)
+        _client().bucket(bucket_name).blob(name).download_to_filename(tmp_path)
+    except NotFound:
+        os.unlink(tmp_path)
+        yield None
+        return
+    try:
         yield Path(tmp_path)
     finally:
         try:

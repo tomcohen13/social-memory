@@ -5,7 +5,6 @@ import torch
 import torch.nn.functional as F
 from collections import defaultdict
 
-
 from social_memory.constants import PATH_TO_AUGMENTED_DATA, SIQDatasetColumns
 from social_memory.transforms import Transform
 from social_memory.transforms.video import load_chunks
@@ -15,8 +14,7 @@ class SIQ2LongDataset:
         self,
         split: str,
         group_by_video: bool = True,
-        # transform: TransformList | None = None,
-        num_frames_per_video: int = 32,
+        num_frames_per_video: int = 16,
         max_chunks_per_video: int = 24,
     ):
 
@@ -59,7 +57,7 @@ class SIQ2LongDataset:
 
         valid_mask = self.data[SIQDatasetColumns.VIDEO_ID].apply(_has_valid_chunks)
         n_dropped = (~valid_mask).sum()
-        print(f"Dropping {n_dropped} videos with corrupt / too many chunks")
+        # print(f"Dropping {n_dropped} videos with corrupt / too many chunks")
         self.data = self.data[valid_mask].reset_index(drop=True)
         
         if group_by_video:
@@ -84,7 +82,7 @@ class SIQ2LongDataset:
             n_chunks = len(result.get("chunks", {}))
             print(f"[worker {os.getpid()}] {x.get('vid_name')}: {n_chunks} chunks, {elapsed:.2f}s")
             return result
-        except BaseException as e:  # catch even keyboard-interrupts / system exits within the worker
+        except Exception as e:
             print(f"Skipping idx={idx}: {type(e).__name__}: {e}", flush=True)
             return None
 
@@ -124,37 +122,38 @@ def compute_batch_loss(model, batch, temperature=0.07, timings=None):
     n_chunks_total = 0
     n_questions_total = 0
 
-    for v_idx in range(len(batch["vid_name"])):
-        print(f"  [compute] v_idx={v_idx} vid={batch['vid_name'][v_idx]}", flush=True)
-        chunks = sorted(batch["chunks"][v_idx].values(), key=lambda c: c["chunk_idx"])
-        sorted_chunk_ids = [c["chunk_idx"] for c in chunks]
-        n_chunks_total += len(chunks)
+    with torch.amp.autocast("cuda", enabled=torch.cuda.is_available()):
+        for v_idx in range(len(batch["vid_name"])):
+            print(f"  [compute] v_idx={v_idx} vid={batch['vid_name'][v_idx]}", flush=True)
+            chunks = sorted(batch["chunks"][v_idx].values(), key=lambda c: c["chunk_idx"])
+            sorted_chunk_ids = [c["chunk_idx"] for c in chunks]
+            n_chunks_total += len(chunks)
 
-        try:
-            with timer("encode_chunks", timings):
-                chunk_embs = model.encode_chunks(
-                    [c["frames"] for c in chunks],
-                    [c["transcript"] for c in chunks],
+            try:
+                with timer("encode_chunks", timings):
+                    chunk_embs = model.encode_chunks(
+                        [c["frames"] for c in chunks],
+                        [c["transcript"] for c in chunks],
+                    )
+            except Exception as e:
+                print(f"problem encoding {v_idx}: {e}")
+                continue
+
+            questions = batch["question"][v_idx]
+            n_questions_total += len(questions)
+
+            with timer("encode_questions", timings):
+                question_embs = model.encode_questions(questions)
+
+            with timer("loss_compute", timings):
+                logits = (question_embs @ chunk_embs.T) / temperature
+                oracle = batch["oracle_idx"][v_idx]
+                oracle = sorted_chunk_ids.index(oracle)
+                labels = torch.full(
+                    (len(questions),), oracle, dtype=torch.long, device=logits.device,
                 )
-        except Exception as e:
-            print(f"problem encoding {v_idx}: {e}")
-            continue
-
-        questions = batch["question"][v_idx]
-        n_questions_total += len(questions)
-
-        with timer("encode_questions", timings):
-            question_embs = model.encode_questions(questions)
-
-        with timer("loss_compute", timings):
-            logits = (question_embs @ chunk_embs.T) / temperature
-            oracle = batch["oracle_idx"][v_idx]
-            oracle = sorted_chunk_ids.index(oracle)
-            labels = torch.full(
-                (len(questions),), oracle, dtype=torch.long, device=logits.device,
-            )
-            video_loss = F.cross_entropy(logits, labels)
-            losses.append(video_loss)
+                video_loss = F.cross_entropy(logits, labels)
+                losses.append(video_loss)
 
     timings["n_chunks_total"] = n_chunks_total
     timings["n_questions_total"] = n_questions_total
@@ -183,12 +182,14 @@ def train(
     ckpt_dir="checkpoints",
     keep_last_n=3,
     log_every=1,  # log every step while diagnosing; bump back up later
+    max_grad_norm=1.0,
 ):
     model.train()
     step_losses = []
     best_epoch_loss = float("inf")
     global_step = 0
     recent_ckpts = []
+    scaler = torch.amp.GradScaler("cuda", enabled=torch.cuda.is_available())
 
     # GPU info up front
     if torch.cuda.is_available():
@@ -227,10 +228,14 @@ def train(
 
             with timer("backward", timings):
                 optimizer.zero_grad()
-                loss.backward()
+                scaler.scale(loss).backward()
 
             with timer("optimizer_step", timings):
-                optimizer.step()
+                scaler.unscale_(optimizer)
+                # clip_grad_norm_ skips params with .grad=None, so frozen backbone is unaffected
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
+                scaler.step(optimizer)
+                scaler.update()
 
             loss_val = loss.item()
             epoch_losses.append(loss_val)
