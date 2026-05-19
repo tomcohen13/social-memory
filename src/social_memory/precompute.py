@@ -152,12 +152,17 @@ def save_chunk_features(out_dir: Path, vid_name: str, arrays: dict) -> Path:
 
 
 def chunk_features_exist(out_dir: Path, vid_name: str, expected_count: int) -> bool:
-    """Treat the cache as valid only if the row count matches what's on GCS."""
+    """Accept the cache if any chunk encoded successfully.
+
+    With per-chunk skips, a video with N chunks on GCS might cache only N-1
+    (one bad mp4). Demanding strict equality would re-attempt the same video
+    forever; chunks are immutable so partial coverage is a stable state.
+    """
     path = out_dir / f"{vid_name}.npz"
     if not path.exists():
         return False
     with np.load(path, allow_pickle=False) as f:
-        return int(f["video_emb"].shape[0]) == expected_count
+        return int(f["video_emb"].shape[0]) > 0
 
 
 def _to_np1d(x) -> np.ndarray:
@@ -198,14 +203,24 @@ class _ChunkIODataset:
         chunk_idx, mp4_blob, vtt_blob = self.chunks[idx]
         transcript = ""
         if vtt_blob is not None:
-            with download_to_temp(GCS_BUCKET, vtt_blob) as vtt_path:
-                if vtt_path is not None:
-                    transcript = read_vtt_file(vtt_path).strip()
+            try:
+                with download_to_temp(GCS_BUCKET, vtt_blob) as vtt_path:
+                    if vtt_path is not None:
+                        transcript = read_vtt_file(vtt_path).strip()
+            except Exception as e:
+                print(f"  [chunk {chunk_idx}] vtt read failed: {type(e).__name__}: {e}")
 
-        with download_to_temp(GCS_BUCKET, mp4_blob) as mp4_path:
-            if mp4_path is None:
-                return None
-            frames = sample_frames(mp4_path, num_frames=self.num_frames)
+        try:
+            with download_to_temp(GCS_BUCKET, mp4_blob) as mp4_path:
+                if mp4_path is None:
+                    return None
+                frames = sample_frames(mp4_path, num_frames=self.num_frames)
+        except Exception as e:
+            # Bad mp4 (no video stream, truncated, …) — drop just this chunk
+            # so the rest of the video still encodes instead of failing the
+            # whole DataLoader iteration.
+            print(f"  [chunk {chunk_idx}] decode failed: {type(e).__name__}: {e}")
+            return None
 
         # BERT tokenises "" to just [CLS][SEP]; pass a space to be defensive
         # while still being able to flag has_transcript=False downstream.
