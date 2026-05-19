@@ -22,11 +22,6 @@ from pathlib import Path
 
 import modal
 
-# scripts/modal/_helpers.py → parents[2] is the repo root.
-REPO_ROOT = Path(__file__).resolve().parents[2]
-SRC_DIR = REPO_ROOT / "src" / "social_memory"
-DATA_DIR = REPO_ROOT / "datasets" / "siq2long"
-
 FEATURES_DIR = "/features"
 CKPT_DIR = "/checkpoints"
 
@@ -54,13 +49,26 @@ IMAGE = (
         "scikit-learn>=1.4",
         "wandb>=0.18",
     )
-    .add_local_dir(str(SRC_DIR), remote_path="/root/social_memory")
-    .add_local_dir(str(DATA_DIR), remote_path="/root/datasets/siq2long")
-    # Sibling helper module — Modal v1 no longer auto-mounts source files
-    # next to the entrypoint, so the wrapper scripts' `from _helpers import …`
-    # would fail inside the container without this.
-    .add_local_file(str(Path(__file__)), remote_path="/root/_helpers.py")
 )
+
+# Local-only path resolution + add_local_* mounts. On the host, `_helpers.py`
+# lives at scripts/modal/_helpers.py (parents[2] = repo root). In the Modal
+# container the same file is mounted at /root/_helpers.py — parents[2] would
+# IndexError, and we don't need to mount anything from inside the container
+# anyway since the image is already built. So guard the whole block.
+if modal.is_local():
+    REPO_ROOT = Path(__file__).resolve().parents[2]
+    SRC_DIR = REPO_ROOT / "src" / "social_memory"
+    DATA_DIR = REPO_ROOT / "datasets" / "siq2long"
+    IMAGE = (
+        IMAGE
+        .add_local_dir(str(SRC_DIR), remote_path="/root/social_memory")
+        .add_local_dir(str(DATA_DIR), remote_path="/root/datasets/siq2long")
+        # Sibling helper module — Modal v1 no longer auto-mounts source files
+        # next to the entrypoint, so the wrapper scripts' `from _helpers import …`
+        # would fail inside the container without this.
+        .add_local_file(str(Path(__file__)), remote_path="/root/_helpers.py")
+    )
 
 FEATURES_VOL = modal.Volume.from_name("social-memory-features", create_if_missing=True)
 CKPT_VOL = modal.Volume.from_name("social-memory-checkpoints", create_if_missing=True)
