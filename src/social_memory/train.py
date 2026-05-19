@@ -164,6 +164,59 @@ def compute_batch_loss(model, batch, temperature=0.07, timings=None):
     return torch.stack(losses).mean()
 
 
+def compute_batch_loss_features(model, batch, temperature=0.07, timings=None):
+    """Like `compute_batch_loss`, but each chunk carries precomputed
+    `video_emb`/`transcript_emb` and the batch carries `q_emb` per video.
+    Used by FeatureCachedDataset + XCLIPFeatureAdapter — no backbone in path.
+    """
+    if timings is None:
+        timings = {}
+
+    losses = []
+    n_chunks_total = 0
+    n_questions_total = 0
+
+    for v_idx in range(len(batch["vid_name"])):
+        chunks = sorted(batch["chunks"][v_idx].values(), key=lambda c: c["chunk_idx"])
+        sorted_chunk_ids = [c["chunk_idx"] for c in chunks]
+        n_chunks_total += len(chunks)
+
+        with timer("encode_chunks", timings):
+            chunk_embs = model.encode_chunks(
+                [c["video_emb"] for c in chunks],
+                [c["transcript_emb"] for c in chunks],
+            )
+
+        q_emb = batch["q_emb"][v_idx]
+        n_questions_total += int(q_emb.shape[0])
+
+        with timer("encode_questions", timings):
+            question_embs = model.encode_questions(q_emb)
+
+        with timer("loss_compute", timings):
+            logits = (question_embs @ chunk_embs.T) / temperature
+            oracle = batch["oracle_idx"][v_idx]
+            try:
+                oracle_pos = sorted_chunk_ids.index(oracle)
+            except ValueError:
+                # Oracle chunk missing from precomputed features — skip video.
+                continue
+            labels = torch.full(
+                (question_embs.shape[0],),
+                oracle_pos,
+                dtype=torch.long,
+                device=logits.device,
+            )
+            losses.append(F.cross_entropy(logits, labels))
+
+    timings["n_chunks_total"] = n_chunks_total
+    timings["n_questions_total"] = n_questions_total
+
+    if not losses:
+        return None
+    return torch.stack(losses).mean()
+
+
 def save_checkpoint(state, ckpt_dir, name):
     ckpt_dir = Path(ckpt_dir)
     ckpt_dir.mkdir(parents=True, exist_ok=True)
@@ -183,7 +236,13 @@ def train(
     ckpt_dir="checkpoints",
     keep_last_n=3,
     log_every=1,  # log every step while diagnosing; bump back up later
+    compute_loss_fn=None,
+    log_callback=None,
 ):
+    if compute_loss_fn is None:
+        compute_loss_fn = compute_batch_loss
+    if log_callback is None:
+        log_callback = lambda metrics: None  # noqa: E731
     model.train()
     step_losses = []
     best_epoch_loss = float("inf")
@@ -216,9 +275,9 @@ def train(
 
             timings = {}
 
-            print(f"[main] step {step} calling compute_batch_loss", flush=True)
+            print(f"[main] step {step} calling compute_loss_fn", flush=True)
             with timer("forward", timings):
-                loss = compute_batch_loss(model, batch, temperature, timings)
+                loss = compute_loss_fn(model, batch, temperature, timings)
 
             if loss is None:
                 t_step_end = time.perf_counter()
@@ -239,6 +298,20 @@ def train(
                 "epoch": epoch,
                 "step": step,
                 "loss": loss_val,
+            })
+            log_callback({
+                "train/loss": loss_val,
+                "train/epoch": epoch,
+                "train/step": step,
+                "train/global_step": global_step,
+                "perf/dataload_s": t_dataload,
+                "perf/forward_s": timings.get("forward", 0.0),
+                "perf/backward_s": timings.get("backward", 0.0),
+                "perf/optimizer_s": timings.get("optimizer_step", 0.0),
+                "perf/encode_chunks_s": timings.get("encode_chunks", 0.0),
+                "perf/encode_questions_s": timings.get("encode_questions", 0.0),
+                "perf/n_chunks": timings.get("n_chunks_total", 0),
+                "perf/n_questions": timings.get("n_questions_total", 0),
             })
 
             if step % log_every == 0:
@@ -294,6 +367,11 @@ def train(
 
         avg_loss = sum(epoch_losses) / len(epoch_losses)
         print(f"=== Epoch {epoch + 1} complete | avg loss {avg_loss:.4f} ===")
+        log_callback({
+            "epoch/avg_loss": avg_loss,
+            "epoch/index": epoch,
+            "epoch/n_steps": len(epoch_losses),
+        })
 
         state = {
             "epoch": epoch,
