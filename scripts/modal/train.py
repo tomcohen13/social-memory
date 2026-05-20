@@ -344,7 +344,12 @@ def validate(
     model.eval()
 
     def _chunk_embs_for_mode(chunks, mode: str) -> torch.Tensor:
-        """Run the chunk adapter on a single-modality or fused input."""
+        """Run the chunk adapter on a single-modality or fused input.
+
+        If the adapter's `chunk_adapter` was built for a concatenated
+        [v; t] input (e.g. `EarlyFusionAdapter`, in_features = feat_dim * 2),
+        right-pad the single-modality input with zeros to match in_features.
+        """
         if mode == "fused":
             return model.encode_chunks(
                 [c["video_emb"] for c in chunks],
@@ -354,6 +359,13 @@ def validate(
         x = torch.stack(
             [model._to_tensor(c[key]) for c in chunks], dim=0
         )
+        expected_in = model.chunk_adapter.net[0].in_features
+        if x.shape[-1] < expected_in:
+            pad = torch.zeros(
+                *x.shape[:-1], expected_in - x.shape[-1],
+                dtype=x.dtype, device=x.device,
+            )
+            x = torch.cat([x, pad], dim=-1)
         out = model.chunk_adapter(x)
         return F.normalize(out, dim=-1)
 
