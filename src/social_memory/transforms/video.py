@@ -11,7 +11,7 @@ import subprocess
 import os
 
 from collections import Counter, defaultdict
-from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import partial
 from pathlib import Path
 from typing import List, Tuple
@@ -218,50 +218,27 @@ def load_chunks(input: dict, num_frames: int) -> dict:
     chunks = defaultdict(dict)
     video_id = input.get(SIQDatasetColumns.VIDEO_ID.value)
 
-    # When running inside a DataLoader worker, processes already provide video-level parallelism.
-    # Each worker only loads one video at a time, so a small thread pool suffices.
-    # In the main process (num_workers=0) we want more threads since there's no process parallelism.
-    from torch.utils.data import get_worker_info
-    in_worker = get_worker_info() is not None
-    inner_workers = 2 if in_worker else 8
-
-    # Per-chunk timeout: if any chunk decode hangs (e.g. corrupt pts never reaching target),
-    # as_completed raises FuturesTimeoutError instead of blocking forever.
-    # shutdown(wait=False) skips waiting for stuck threads so the worker process moves on.
-    # The stuck thread eventually dies when the worker process is recycled.
-    chunk_timeout = 60  # seconds; a 1-min chunk at 30fps should decode in well under this
-
     local_dir = f"../chunks/{video_id}/"
     if os.path.exists(local_dir):
         paths = glob.glob(f"{local_dir}*")
-        ex = ThreadPoolExecutor(max_workers=min(len(paths), inner_workers))
-        futures = [ex.submit(partial(process_file, num_frames=num_frames), p) for p in paths]
-        try:
-            for f in as_completed(futures, timeout=chunk_timeout):
+        with ThreadPoolExecutor(max_workers=min(len(paths), 8)) as ex:
+            futures = [ex.submit(partial(process_file, num_frames=num_frames), p) for p in paths]
+            for f in as_completed(futures):
                 chunk_idx, result = f.result()
                 chunks[chunk_idx].update(result)
-        except FuturesTimeoutError:
-            print(f"[WARN] chunk loading timed out for {video_id}, returning partial result", flush=True)
-        finally:
-            ex.shutdown(wait=False)
         input["chunks"] = chunks
         return input
 
     print("loading from GCS...")
     blobs = list(list_blobs(GCS_BUCKET, GCS_CHUNKS_PREFIX + f"/{video_id}/"))
-    ex = ThreadPoolExecutor(max_workers=inner_workers)
-    futures = [ex.submit(partial(process_blob, num_frames=num_frames), b) for b in blobs]
-    try:
-        for f in as_completed(futures, timeout=chunk_timeout):
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        futures = [ex.submit(partial(process_blob, num_frames=num_frames), b) for b in blobs]
+        for f in as_completed(futures):
             result = f.result()
             if result:
                 chunk_idx, key, value = result
                 chunks[chunk_idx][key] = value
                 chunks[chunk_idx]["chunk_idx"] = chunk_idx
-    except FuturesTimeoutError:
-        print(f"[WARN] GCS chunk loading timed out for {video_id}, returning partial result", flush=True)
-    finally:
-        ex.shutdown(wait=False)
 
     # assert len(chunks) == input["num_chunks"]
     input["chunks"] = chunks

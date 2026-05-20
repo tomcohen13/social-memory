@@ -311,12 +311,7 @@ def train(
         }
 
         last_path = save_checkpoint(state, ckpt_dir, f"epoch_{epoch:04d}")
-        recent_ckpts.append(last_path)
-        while len(recent_ckpts) > keep_last_n:
-            old = recent_ckpts.pop(0)
-            old.unlink(missing_ok=True)
 
-        save_checkpoint(state, ckpt_dir, "latest")
 
         if avg_loss < best_epoch_loss:
             best_epoch_loss = avg_loss
