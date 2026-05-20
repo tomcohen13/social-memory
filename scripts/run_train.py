@@ -89,6 +89,9 @@ def main():
         pin_memory=device == "cuda",
         persistent_workers=args.num_workers > 0,
         prefetch_factor=2 if args.num_workers > 0 else None,
+        # Raise RuntimeError instead of hanging silently if a worker gets stuck.
+        # Should exceed the per-video chunk_timeout (60s) × max chunks per batch.
+        timeout=300 if args.num_workers > 0 else 0,
     )
 
     train(

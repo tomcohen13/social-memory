@@ -218,13 +218,14 @@ def train(
             timings = {}
 
             print(f"[main] step {step} calling compute_batch_loss", flush=True)
+            t_forward_start = time.perf_counter()
             with timer("forward", timings):
                 loss = compute_batch_loss(model, batch, temperature, timings)
 
             if loss is None:
                 t_step_end = time.perf_counter()
                 continue
-            print(f"[main] step {step} compute_batch_loss done in {time.perf_counter() - t_dataload:.2f}s, loss={loss}", flush=True)
+            print(f"[main] step {step} compute_batch_loss done in {time.perf_counter() - t_forward_start:.2f}s, loss={loss}", flush=True)
 
             with timer("backward", timings):
                 optimizer.zero_grad()
