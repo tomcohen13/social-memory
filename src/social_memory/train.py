@@ -4,6 +4,7 @@ import pandas as pd
 import torch
 import torch.nn.functional as F
 from collections import defaultdict
+from tqdm import tqdm
 
 from social_memory.constants import PATH_TO_AUGMENTED_DATA, SIQDatasetColumns
 from social_memory.transforms import Transform
@@ -163,6 +164,15 @@ def compute_batch_loss(model, batch, temperature=0.07, timings=None):
     return torch.stack(losses).mean()
 
 
+def _wandb_log(metrics: dict, step: int) -> None:
+    try:
+        import wandb
+        if wandb.run is not None:
+            wandb.log(metrics, step=step)
+    except ImportError:
+        pass
+
+
 def save_checkpoint(state, ckpt_dir, name):
     ckpt_dir = Path(ckpt_dir)
     ckpt_dir.mkdir(parents=True, exist_ok=True)
@@ -206,7 +216,8 @@ def train(
         # Time the wait for the first batch separately — that's dataloader startup
         t_step_end = time.perf_counter()
 
-        for step, batch in enumerate(dataloader):
+        pbar = tqdm(dataloader, desc=f"Epoch {epoch + 1}/{num_epochs}", unit="step")
+        for step, batch in enumerate(pbar):
             t_dataload = time.perf_counter() - t_step_end
             print(f"[main] step {step} START at {time.strftime('%H:%M:%S')} | got {len(batch['vid_name'])} videos: {batch['vid_name']}", flush=True)
     
@@ -256,7 +267,23 @@ def train(
                     mem_reserved = torch.cuda.memory_reserved() / 1e9
                     mem_str = f" | gpu_mem alloc={mem_alloc:.2f}GB reserved={mem_reserved:.2f}GB"
                 else:
+                    mem_alloc = mem_reserved = None
                     mem_str = ""
+
+                _wandb_log({
+                    "train/loss": loss_val,
+                    "train/dataload_s": t_dataload,
+                    "train/forward_s": timings["forward"],
+                    "train/backward_s": timings["backward"],
+                    "train/encode_chunks_s": timings.get("encode_chunks", 0),
+                    "train/encode_questions_s": timings.get("encode_questions", 0),
+                    "train/n_chunks": timings["n_chunks_total"],
+                    "train/s_per_chunk": timings.get("encode_chunks", 0) / max(timings["n_chunks_total"], 1),
+                    **({
+                        "gpu/mem_alloc_gb": mem_alloc,
+                        "gpu/mem_reserved_gb": mem_reserved,
+                    } if mem_alloc is not None else {}),
+                }, step=global_step)
 
                 print(
                     f"\nepoch {epoch} step {step} | loss {loss_val:.4f} | "
@@ -291,6 +318,7 @@ def train(
                     f"  optimizer_step:  {timings['optimizer_step']:.3f}s"
                 )
 
+            pbar.set_postfix(loss=f"{loss_val:.4f}")
             global_step += 1
             t_step_end = time.perf_counter()
 
@@ -300,6 +328,7 @@ def train(
 
         avg_loss = sum(epoch_losses) / len(epoch_losses)
         print(f"=== Epoch {epoch + 1} complete | avg loss {avg_loss:.4f} ===")
+        _wandb_log({"train/epoch_avg_loss": avg_loss, "epoch": epoch}, step=global_step)
 
         state = {
             "epoch": epoch,

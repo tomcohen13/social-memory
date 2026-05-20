@@ -48,6 +48,8 @@ def main():
 
     # Logging
     parser.add_argument("--log_every", type=int, default=1)
+    parser.add_argument("--wandb_project", type=str, default=None)
+    parser.add_argument("--wandb_name", type=str, default=None)
 
     args = parser.parse_args()
 
@@ -84,15 +86,18 @@ def main():
         dataset,
         batch_size=args.batch_size,
         shuffle=True,
-        num_workers=args.num_workers,
+        num_workers=0,
         collate_fn=collate_fn,
         pin_memory=device == "cuda",
-        persistent_workers=args.num_workers > 0,
-        prefetch_factor=2 if args.num_workers > 0 else None,
-        # Raise RuntimeError instead of hanging silently if a worker gets stuck.
-        # Should exceed the per-video chunk_timeout (60s) × max chunks per batch.
-        timeout=300 if args.num_workers > 0 else 0,
     )
+
+    if args.wandb_project:
+        import wandb
+        wandb.init(
+            project=args.wandb_project,
+            name=args.wandb_name,
+            config=vars(args),
+        )
 
     train(
         model=model,
@@ -105,6 +110,9 @@ def main():
         log_every=args.log_every,
         max_grad_norm=args.max_grad_norm,
     )
+
+    if args.wandb_project:
+        wandb.finish()
 
 
 if __name__ == "__main__":
