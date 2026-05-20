@@ -1,6 +1,5 @@
 """X-CLIP text + video encoders (weights frozen). Frame sampling via PyAV."""
 
-from collections import Counter
 from pathlib import Path
 from typing import TypedDict
 
@@ -97,56 +96,88 @@ class RemoteInternVideoEncoder:
         return torch.from_numpy(self._cls.encode_text.remote(text))
 
 
-def _decoded_frame_count(video_path: Path) -> int:
+def _duration_in_pts(stream: av.video.stream.VideoStream, container: av.container.InputContainer) -> int:
+    if stream.duration and stream.duration > 0:
+        return int(stream.duration)
+    if container.duration and stream.time_base:
+        return int((container.duration / 1_000_000) / float(stream.time_base))
+    return 0
+
+
+def _sample_frames_sequential(video_path: Path, num_frames: int) -> list[np.ndarray]:
+    """Fallback when duration metadata is missing: single sequential pass."""
     with av.open(str(video_path)) as container:
-        return sum(1 for _ in container.decode(video=0))
+        stream = container.streams.video[0]
+        stream.thread_type = "AUTO"
+        total = sum(1 for _ in container.decode(stream))
 
+    if total <= 0:
+        raise ValueError(f"No decodable video frames in {video_path}")
 
-def _stream_total_frames(stream: av.video.stream.VideoStream, video_path: Path) -> int:
-    if stream.frames and stream.frames > 0:
-        return int(stream.frames)
-    duration_s: float | None = None
-    if stream.duration is not None and stream.time_base is not None:
-        duration_s = float(stream.duration * stream.time_base)
-    if duration_s is not None and stream.average_rate is not None:
-        est = int(duration_s * float(stream.average_rate))
-        if est > 0:
-            return est
-    return _decoded_frame_count(video_path)
+    targets = set(np.linspace(0, total - 1, num_frames, dtype=int).tolist())
+    frames: list[np.ndarray] = []
+    with av.open(str(video_path)) as container:
+        stream = container.streams.video[0]
+        stream.thread_type = "AUTO"
+        for i, frame in enumerate(container.decode(stream)):
+            if i in targets:
+                frames.append(frame.to_ndarray(format="rgb24"))
+                if len(frames) == num_frames:
+                    break
+
+    if len(frames) < num_frames:
+        if not frames:
+            raise ValueError(f"No frames decoded from {video_path}")
+        frames.extend([frames[-1]] * (num_frames - len(frames)))
+    return frames
 
 
 def sample_frames(video_path: Path, num_frames: int) -> list[np.ndarray]:
     """
     Decode `num_frames` evenly-spaced RGB frames from an mp4 as HWC uint8 arrays.
 
-    Uses container metadata when reliable; otherwise counts by decoding once.
-    If the stream ends before enough frames are collected (bad metadata), pads
-    by repeating the last decoded frame so the list length is always `num_frames`.
+    Seeks to each target PTS (lands on the nearest preceding keyframe) and decodes
+    forward only until the target is reached — O(num_frames * keyframe_gap) work
+    instead of decoding every frame in the file. Falls back to a single sequential
+    pass when duration metadata is unavailable.
     """
     with av.open(str(video_path)) as container:
         stream = container.streams.video[0]
-        total = _stream_total_frames(stream, video_path)
+        stream.thread_type = "AUTO"
+        duration_ts = _duration_in_pts(stream, container)
 
-    if total <= 0:
-        raise ValueError(f"No decodable video frames in {video_path}")
+        if duration_ts <= 0:
+            # No reliable duration — can't compute PTS targets without a frame count.
+            return _sample_frames_sequential(video_path, num_frames)
 
-    targets = np.linspace(0, total - 1, num_frames, dtype=int).tolist()
-    want = Counter(targets)
-    frames: list[np.ndarray] = []
+        targets = np.linspace(0, duration_ts, num_frames, dtype=np.int64).tolist()
+        frames: list[np.ndarray] = []
+        last: np.ndarray | None = None
 
-    with av.open(str(video_path)) as container:
-        for i, frame in enumerate(container.decode(video=0)):
-            k = want.get(i, 0)
-            if k:
-                arr = frame.to_ndarray(format="rgb24")
-                for _ in range(k):
-                    frames.append(arr)
-                    if len(frames) == num_frames:
-                        return frames
+        for target in targets:
+            container.seek(int(target), stream=stream, any_frame=False, backward=True)
+            chosen: np.ndarray | None = None
+            prev: av.VideoFrame | None = None
+            for frame in container.decode(stream):
+                if frame.pts is None:
+                    continue
+                if frame.pts >= target:
+                    # Prefer the frame closest to the target (prev may be closer).
+                    pick = prev if prev is not None and (target - prev.pts) < (frame.pts - target) else frame
+                    chosen = pick.to_ndarray(format="rgb24")
+                    break
+                prev = frame
+            if chosen is None and prev is not None:
+                chosen = prev.to_ndarray(format="rgb24")
+            if chosen is None:
+                chosen = last
+            if chosen is None:
+                continue
+            frames.append(chosen)
+            last = chosen
 
+    if not frames:
+        raise ValueError(f"No frames decoded from {video_path}")
     if len(frames) < num_frames:
-        if not frames:
-            raise ValueError(f"No frames decoded from {video_path} (metadata total={total})")
-        pad = frames[-1]
-        frames.extend([pad] * (num_frames - len(frames)))
+        frames.extend([frames[-1]] * (num_frames - len(frames)))
     return frames

@@ -241,3 +241,50 @@ class XCLIPFeatureAdapter(nn.Module):
             x = x.unsqueeze(0)
         out = self.question_adapter(x)
         return F.normalize(out, dim=-1)
+
+
+class EarlyFusionAdapter(nn.Module):
+    """
+    Trainable early fusion adapter that consumes precomputed embeddings.
+    Inputs are expected to be already L2-normalized by the frozen encoder.
+    """
+
+    def __init__(
+        self,
+        feat_dim: int = 512,
+        hidden_dim: int = 512,
+        output_dim: int = 256,
+    ):
+        super().__init__()
+        self.feat_dim = feat_dim
+        self.chunk_adapter = _MLPHead(feat_dim * 2, hidden_dim, output_dim)
+        self.question_adapter = _MLPHead(feat_dim, hidden_dim, output_dim)
+
+    @property
+    def device(self) -> torch.device:
+        return next(self.parameters()).device
+
+    def _to_tensor(self, x) -> torch.Tensor:
+        if isinstance(x, torch.Tensor):
+            return x.to(self.device, dtype=torch.float32, non_blocking=True)
+        return torch.from_numpy(np.asarray(x, dtype=np.float32)).to(self.device)
+
+    def encode_chunks(
+        self,
+        video_embs: list,
+        transcript_embs: list,
+    ) -> torch.Tensor:
+        """video_embs, transcript_embs: lists of 1-D (D,) arrays/tensors."""
+        v = torch.stack([self._to_tensor(x) for x in video_embs], dim=0) # (num_chunks, feat_dim)
+        t = torch.stack([self._to_tensor(x) for x in transcript_embs], dim=0)  # (num_chunks, feat_dim)
+        fused = torch.cat((v, t), dim=1)  # (num_chunks, feat_dim * 2)
+        out = self.chunk_adapter(fused)
+        return F.normalize(out, dim=-1)
+
+    def encode_questions(self, q_embs) -> torch.Tensor:
+        """q_embs: (N, D) array/tensor."""
+        x = self._to_tensor(q_embs)
+        if x.ndim == 1:
+            x = x.unsqueeze(0)
+        out = self.question_adapter(x)
+        return F.normalize(out, dim=-1)
