@@ -61,6 +61,7 @@ where = ["src"]
 [dependency-groups]
 dev = [
     "fastapi>=0.136.1",
+    "modal>=0.64",
     "pytest>=8.0",
 ]
 

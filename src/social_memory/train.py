@@ -1,5 +1,6 @@
 
 import time, os
+import numpy as np
 import pandas as pd
 import torch
 import torch.nn.functional as F
@@ -217,6 +218,77 @@ def compute_batch_loss_features(model, batch, temperature=0.07, timings=None):
     return torch.stack(losses).mean()
 
 
+def compute_batch_loss_late_interaction(model, batch, temperature=0.07, timings=None):
+    """InfoNCE over MaxSim scores for `LateInteractionAdapter`.
+
+    Pooled XCLIP features are fed as 1-token sequences (B, 1, D); the Q-Former
+    expands each chunk to K output tokens. Per video, score (Nq, Nc) via
+    MaxSim, multiply by the adapter's learned `logit_scale`, cross-entropy
+    against the oracle chunk index. `temperature` is ignored — the adapter
+    owns its own learnable scale.
+    """
+    from social_memory.adapters.late_interaction import LateInteractionAdapter
+
+    if timings is None:
+        timings = {}
+
+    device = next(model.parameters()).device
+    losses = []
+    n_chunks_total = 0
+    n_questions_total = 0
+
+    for v_idx in range(len(batch["vid_name"])):
+        chunks = sorted(batch["chunks"][v_idx].values(), key=lambda c: c["chunk_idx"])
+        sorted_chunk_ids = [c["chunk_idx"] for c in chunks]
+        n_chunks_total += len(chunks)
+
+        oracle = batch["oracle_idx"][v_idx]
+        try:
+            oracle_pos = sorted_chunk_ids.index(oracle)
+        except ValueError:
+            continue
+
+        v = torch.from_numpy(
+            np.stack([np.asarray(c["video_emb"], dtype=np.float32) for c in chunks])
+        ).to(device).unsqueeze(1)  # (Nc, 1, D)
+        t = torch.from_numpy(
+            np.stack([np.asarray(c["transcript_emb"], dtype=np.float32) for c in chunks])
+        ).to(device).unsqueeze(1)  # (Nc, 1, D)
+
+        with timer("encode_chunks", timings):
+            chunk_tokens = model.encode_chunk(v, t)  # (Nc, K, d_out)
+
+        q_emb = batch["q_emb"][v_idx]
+        if isinstance(q_emb, torch.Tensor):
+            q = q_emb.to(device=device, dtype=torch.float32)
+        else:
+            q = torch.from_numpy(np.asarray(q_emb, dtype=np.float32)).to(device)
+        if q.ndim == 1:
+            q = q.unsqueeze(0)
+        q = q.unsqueeze(1)  # (Nq, 1, D)
+        n_questions_total += int(q.shape[0])
+
+        with timer("encode_questions", timings):
+            question_tokens = model.encode_question(q)  # (Nq, 1, d_out)
+
+        with timer("loss_compute", timings):
+            sims = LateInteractionAdapter.maxsim_matrix(
+                question_tokens, chunk_tokens
+            )  # (Nq, Nc)
+            logits = sims * model.temperature()
+            labels = torch.full(
+                (logits.shape[0],), oracle_pos, dtype=torch.long, device=logits.device,
+            )
+            losses.append(F.cross_entropy(logits, labels))
+
+    timings["n_chunks_total"] = n_chunks_total
+    timings["n_questions_total"] = n_questions_total
+
+    if not losses:
+        return None
+    return torch.stack(losses).mean()
+
+
 def save_checkpoint(state, ckpt_dir, name):
     ckpt_dir = Path(ckpt_dir)
     ckpt_dir.mkdir(parents=True, exist_ok=True)
@@ -418,6 +490,7 @@ def train_features_run(
     features_root,
     ckpt_dir,
     *,
+    adapter: str = "xclip",
     split: str = "train",
     epochs: int = 3,
     batch_size: int = 4,
@@ -425,7 +498,7 @@ def train_features_run(
     temperature: float = 0.07,
     hidden_dim: int = 512,
     output_dim: int = 256,
-    num_workers: int = 2,
+    num_workers: int = 0,
     max_chunks_per_video: int = 24,
     ckpt_every: int = 5,
     wandb_config: dict | None = None,
@@ -449,10 +522,20 @@ def train_features_run(
     from torch.utils.data import DataLoader
 
     from social_memory.feature_dataset import (
+        EarlyFusionAdapter,
         FeatureCachedDataset,
         XCLIPFeatureAdapter,
         feature_collate_fn,
     )
+
+    adapter_classes = {
+        "xclip": XCLIPFeatureAdapter,
+        "early_fusion": EarlyFusionAdapter,
+    }
+    if adapter not in adapter_classes:
+        raise ValueError(
+            f"unknown adapter {adapter!r} (expected one of {sorted(adapter_classes)})"
+        )
 
     features_root = Path(features_root)
     if not (features_root / "chunks").exists():
@@ -477,13 +560,13 @@ def train_features_run(
     )
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = XCLIPFeatureAdapter(
+    model = adapter_classes[adapter](
         feat_dim=dataset.dim,
         hidden_dim=hidden_dim,
         output_dim=output_dim,
     ).to(device)
     n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"adapter on {device} | trainable params: {n_trainable:,}")
+    print(f"{adapter} adapter on {device} | trainable params: {n_trainable:,}")
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
 
@@ -498,6 +581,7 @@ def train_features_run(
             entity=wandb_config.get("entity"),
             name=wandb_config.get("run_name"),
             config={
+                "adapter": adapter,
                 "split": split,
                 "epochs": epochs,
                 "batch_size": batch_size,
@@ -527,6 +611,136 @@ def train_features_run(
             ckpt_dir=str(ckpt_dir),
             ckpt_every=ckpt_every,
             compute_loss_fn=compute_batch_loss_features,
+            log_callback=log_callback,
+            post_save_callback=post_save_callback,
+        )
+    finally:
+        if wandb_run is not None:
+            import wandb
+
+            wandb.finish()
+
+
+def train_late_interaction_run(
+    features_root,
+    ckpt_dir,
+    *,
+    split: str = "train",
+    epochs: int = 3,
+    batch_size: int = 4,
+    lr: float = 1e-4,
+    hidden_dim: int = 512,
+    output_dim: int = 128,
+    num_chunk_tokens: int = 8,
+    num_qformer_layers: int = 2,
+    num_heads: int = 4,
+    dropout: float = 0.0,
+    init_temperature: float = 0.07,
+    num_workers: int = 0,
+    max_chunks_per_video: int = 24,
+    ckpt_every: int = 5,
+    wandb_config: dict | None = None,
+    post_save_callback=None,
+):
+    """Shared driver for `LateInteractionAdapter` on cached XCLIP features.
+
+    Mirrors `train_features_run` but builds a multi-vector adapter and uses
+    the MaxSim-based loss. Pooled cached embeddings are fed as 1-token
+    sequences — the Q-Former expands chunks to `num_chunk_tokens` views the
+    question can MaxSim against.
+    """
+    from torch.utils.data import DataLoader
+
+    from social_memory.adapters.late_interaction import LateInteractionAdapter
+    from social_memory.feature_dataset import (
+        FeatureCachedDataset,
+        feature_collate_fn,
+    )
+
+    features_root = Path(features_root)
+    if not (features_root / "chunks").exists():
+        raise FileNotFoundError(
+            f"no precomputed chunks at {features_root}/chunks — run precompute first"
+        )
+
+    dataset = FeatureCachedDataset(
+        split=split,
+        features_root=features_root,
+        max_chunks_per_video=max_chunks_per_video,
+    )
+    print(f"dataset: {len(dataset)} videos | feat_dim={dataset.dim}")
+
+    dataloader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        collate_fn=feature_collate_fn,
+        pin_memory=True,
+    )
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model = LateInteractionAdapter(
+        d_video=dataset.dim,
+        d_text=dataset.dim,
+        d_out=output_dim,
+        d_hidden=hidden_dim,
+        num_chunk_tokens=num_chunk_tokens,
+        num_qformer_layers=num_qformer_layers,
+        num_heads=num_heads,
+        dropout=dropout,
+        init_temperature=init_temperature,
+    ).to(device)
+    n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"late-interaction adapter on {device} | trainable params: {n_trainable:,}")
+
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+
+    log_callback = None
+    wandb_run = None
+    if wandb_config and wandb_config.get("api_key"):
+        os.environ["WANDB_API_KEY"] = wandb_config["api_key"]
+        import wandb
+
+        wandb_run = wandb.init(
+            project=wandb_config.get("project", "social-memory"),
+            entity=wandb_config.get("entity"),
+            name=wandb_config.get("run_name"),
+            config={
+                "adapter": "late_interaction",
+                "split": split,
+                "epochs": epochs,
+                "batch_size": batch_size,
+                "lr": lr,
+                "init_temperature": init_temperature,
+                "hidden_dim": hidden_dim,
+                "output_dim": output_dim,
+                "num_chunk_tokens": num_chunk_tokens,
+                "num_qformer_layers": num_qformer_layers,
+                "num_heads": num_heads,
+                "dropout": dropout,
+                "feat_dim": dataset.dim,
+                "n_trainable": n_trainable,
+                "max_chunks_per_video": max_chunks_per_video,
+                "ckpt_every": ckpt_every,
+                "dataset_size": len(dataset),
+                **(wandb_config.get("extra_config") or {}),
+            },
+        )
+        log_callback = wandb.log
+    elif wandb_config:
+        print("WARN: wandb_config given but no api_key — skipping wandb logging")
+
+    try:
+        train(
+            model,
+            dataloader,
+            optimizer,
+            num_epochs=epochs,
+            temperature=init_temperature,
+            ckpt_dir=str(ckpt_dir),
+            ckpt_every=ckpt_every,
+            compute_loss_fn=compute_batch_loss_late_interaction,
             log_callback=log_callback,
             post_save_callback=post_save_callback,
         )
